@@ -1,5 +1,6 @@
+import json
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 
@@ -53,3 +54,19 @@ class TelemetryMessage:
             isinstance(flag, str) for flag in self.status_flags
         ):
             raise TelemetryValidationError("status_flags must be a list of strings")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": self.schema_version,
+            "device_id": self.device_id,
+            "sequence_no": self.sequence_no,
+            "event_time": self.event_time.astimezone(timezone.utc).isoformat(),
+            "message_type": self.message_type.value,
+            "battery_percent": self.battery_percent,
+            "temperature_c": self.temperature_c,
+            "network_rssi": self.network_rssi,
+            "status_flags": self.status_flags.copy(),
+        }
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), ensure_ascii=False)
