@@ -1,0 +1,11 @@
+{
+    "schema_version": "1.0",
+    "device_id": "robot-001",
+    "sequence_no": 1001,
+    "event_time": "2026/09/28 14:30:15",
+    "message_type": "telemetry",
+    "battery_percent": 82.5,
+    "temperature_c": 41.2,
+    "network_rssi": -67,
+    "status_flags": []
+}

@@ -1,0 +1,42 @@
+#python virtual environment
+.venv/
+venv/
+
+#python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+#Test and type-check cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage/
+htmlcov/
+
+#Build results
+build/
+dist/
+*egg-info/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+#IDE
+.vscode/
+.idea/
+
+#Operating system
+.DS_Store
+Thumbs.db
+
+#Logs
+*.log
+logs/
+
+#Local databases
+*.db
+*.sqlite
+*.sqlite3
