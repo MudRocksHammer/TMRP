@@ -4,8 +4,8 @@
     "sequence_no": 1001,
     "event_time": "2024-06-01T12:00:00Z",
     "message_type": "telemetry",
-    "battery_level": 82.5,
-    "temperature": 41.2,
+    "battery_percent": 82.5,
+    "temperature_c": 41.2,
     "network_rssi": -67,
     "status_flags": [
         "motor_enabled",
