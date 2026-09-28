@@ -89,3 +89,20 @@ def test_to_dict_not_share_status_flags():
 
     assert flags == ["ok", "changed"]
     assert message.status_flags == ["ok"]
+
+
+def test_from_dict():
+    json_data = {
+        "schema_version": "1.0",
+        "device_id": "robot-001",
+        "sequence_no": 0,
+        "event_time": "2024-06-01T12:00:00Z",
+        "message_type": "telemetry",
+        "battery_percent": 82.5,
+        "temperature_c": 41.2,
+        "network_rssi": -67,
+        "status_flags": ["motor_enabled", "gps_fixed"],
+    }
+    message = models.TelemetryMessage.from_dict(json_data)
+
+    assert message == models.TelemetryMessage.from_dict(message.to_dict())
