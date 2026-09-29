@@ -266,3 +266,61 @@ def test_from_dict_does_not_share_status_flags(valid_data: dict[str, object]) ->
 def test_from_dict_rejects_non_dict(data: object):
     with pytest.raises(TelemetryValidationError, match="dictionary"):
         TelemetryMessage.from_dict(data)
+
+
+def test_from_json_valid_data(valid_data: dict[str, object]):
+    text = json.dumps(valid_data)
+    message = TelemetryMessage.from_json(text)
+    assert message.device_id == valid_data["device_id"]
+    assert message.sequence_no == valid_data["sequence_no"]
+    assert message.event_time.isoformat() == valid_data["event_time"].replace(
+        "Z", "+00:00"
+    )
+    assert message.message_type.value == valid_data["message_type"]
+    assert message.battery_percent == valid_data.get("battery_percent")
+    assert message.temperature_c == valid_data.get("temperature_c")
+    assert message.network_rssi == valid_data.get("network_rssi")
+    assert message.status_flags == valid_data.get("status_flags", [])
+
+
+@pytest.mark.parametrize("invalid_json", ["", "{", "{device_id:"])
+def test_from_json_rejects_invalid_json(invalid_json: str):
+    with pytest.raises(TelemetryValidationError, match="Invalid JSON"):
+        TelemetryMessage.from_json(invalid_json)
+
+
+@pytest.mark.parametrize("invalid_json", ["[]", "null", "123", '"hello"'])
+def test_from_json_rejects_non_object(invalid_json: str):
+    with pytest.raises(TelemetryValidationError, match="dictionary"):
+        TelemetryMessage.from_json(invalid_json)
+
+
+def test_from_json_rejects_non_device_id(valid_data: dict[str, object]):
+    valid_data["device_id"] = None
+    text = json.dumps(valid_data)
+    with pytest.raises(TelemetryValidationError, match="device_id"):
+        TelemetryMessage.from_json(text)
+
+
+def test_from_json_rejects_missing_device_id(valid_data: dict[str, object]):
+    del valid_data["device_id"]
+    text = json.dumps(valid_data)
+    with pytest.raises(TelemetryValidationError, match="device_id"):
+        TelemetryMessage.from_json(text)
+
+
+def test_from_json_valid_idempotent(valid_data: dict[str, object]):
+    message = TelemetryMessage.from_json(json.dumps(valid_data))
+    restored = TelemetryMessage.from_json(message.to_json())
+    assert restored == message
+
+
+def test_from_json_round_trip(valid_data: dict[str, object]):
+    valid_data["device_id"] = "ロボット-001"
+    valid_data["event_time"] = "2026-09-29T09:00:00+09:00"
+
+    message = TelemetryMessage.from_json(json.dumps(valid_data))
+    restored = TelemetryMessage.from_json(message.to_json())
+    assert restored == message
+    assert restored.device_id == "ロボット-001"
+    assert restored.event_time.isoformat() == "2026-09-29T00:00:00+00:00"

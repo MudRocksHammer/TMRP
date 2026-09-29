@@ -169,3 +169,12 @@ class TelemetryMessage:
             network_rssi=data.get("network_rssi"),
             status_flags=flags.copy(),
         )
+
+    @classmethod
+    def from_json(cls, text: str) -> Self:
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as e:
+            raise TelemetryValidationError("Invalid JSON") from e
+
+        return cls.from_dict(data)
