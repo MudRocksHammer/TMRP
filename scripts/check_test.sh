@@ -23,5 +23,8 @@ echo "Code quality checks passed."
 .venv/bin/python -m ruff format --check src tests
 echo "Code formatting checks passed."
 
+# run static type checks
+.venv/bin/python -m mypy
+
 # Run test
 .venv/bin/python -m pytest -q

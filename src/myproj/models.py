@@ -123,32 +123,25 @@ class TelemetryMessage:
             or data["message_type"] != MessageType.TELEMETRY.value
         ):
             raise TelemetryValidationError("message_type must be MessageType.TELEMETRY")
-        if "battery_percent" in data and data["battery_percent"] is not None:
-            if (
-                not isinstance(data["battery_percent"], (int, float))
-                or not (0 <= data["battery_percent"] <= 100)
-                or isinstance(data["battery_percent"], bool)
+        battery_percent = data.get("battery_percent")
+        if battery_percent is not None:
+            if not isinstance(battery_percent, (int, float)) or isinstance(
+                battery_percent, bool
             ):
                 raise TelemetryValidationError(
-                    "battery_percent must be between 0 and 100"
+                    "battery_percent must be a number or null"
                 )
-        if "temperature_c" in data and data["temperature_c"] is not None:
-            if (
-                not isinstance(data["temperature_c"], (int, float))
-                or not (-273.15 <= data["temperature_c"] <= 100)
-                or isinstance(data["temperature_c"], bool)
+        temperature_c = data.get("temperature_c")
+        if temperature_c is not None:
+            if not isinstance(temperature_c, (int, float)) or isinstance(
+                temperature_c, bool
             ):
+                raise TelemetryValidationError("temperature_c must be a number or null")
+        network_rssi = data.get("network_rssi")
+        if network_rssi is not None:
+            if not isinstance(network_rssi, int) or isinstance(network_rssi, bool):
                 raise TelemetryValidationError(
-                    "temperature_c must be between -273.15 and 100"
-                )
-        if "network_rssi" in data and data["network_rssi"] is not None:
-            if (
-                not isinstance(data["network_rssi"], int)
-                or not (-100 <= data["network_rssi"] <= 0)
-                or isinstance(data["network_rssi"], bool)
-            ):
-                raise TelemetryValidationError(
-                    "network_rssi must be between -100 and 0"
+                    "network_rssi must be an integer or null"
                 )
         if "status_flags" in data and not isinstance(data["status_flags"], list):
             raise TelemetryValidationError("status_flags must be a list of strings")
@@ -164,9 +157,9 @@ class TelemetryMessage:
             sequence_no=sequence_no,
             event_time=event_time,
             message_type=MessageType(data["message_type"]),
-            battery_percent=data.get("battery_percent"),
-            temperature_c=data.get("temperature_c"),
-            network_rssi=data.get("network_rssi"),
+            battery_percent=battery_percent,
+            temperature_c=temperature_c,
+            network_rssi=network_rssi,
             status_flags=flags.copy(),
         )
 
