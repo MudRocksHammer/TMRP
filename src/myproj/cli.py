@@ -7,7 +7,7 @@ from myproj.models import TelemetryMessage, TelemetryValidationError
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="iot-telemetry")
+    parser = argparse.ArgumentParser(prog="tmrp")
     parser.add_argument(
         "--version",
         action="version",

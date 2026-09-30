@@ -42,7 +42,7 @@ def test_version(capsys: pytest.CaptureFixture[str]) -> None:
 
     assert exc_info.value.code == 0
     assert captured.err == ""
-    assert captured.out.strip() == f"iot-telemetry version:{version('TMRP')}"
+    assert captured.out.strip() == f"tmrp version:{version('TMRP')}"
 
 
 def test_validate_valid_JSON(

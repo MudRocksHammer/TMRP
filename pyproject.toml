@@ -32,7 +32,7 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 
 [project.scripts]
-iot-telemetry = "myproj.cli:main"
+tmrp = "myproj.cli:main"
 
 [tool.mypy]
 python_version = "3.12"
