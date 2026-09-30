@@ -29,3 +29,6 @@ select = ["E", "F", "I"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[project.scripts]
+iot-telemetry = "myproj.cli:main"
