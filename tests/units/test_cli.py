@@ -155,3 +155,136 @@ def test_validate_no_parameters(
     assert captured.out == ""
     assert "error" in captured.err
     assert "Traceback" not in captured.err
+
+
+def test_check_config_valid(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    path = project_root / "examples/config/valid.json"
+
+    exit_code = main(["check-config", str(path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert captured.out != ""
+    assert captured.out.strip() == "environment=development log_level=INFO"
+    assert captured.err == ""
+    assert "Error" not in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_check_config_missing_file(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    path = tmp_path / "missing.json"
+
+    exit_code = main(["check-config", str(path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert captured.out == ""
+    assert "Error" in captured.err
+    assert "missing.json" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_check_config_directory_instead_of_file(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    path = tmp_path / "directory"
+    path.mkdir()
+
+    exit_code = main(["check-config", str(path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert captured.out == ""
+    assert "Error" in captured.err
+    assert "directory" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_check_config_no_parameters(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["check-config"])
+    captured = capsys.readouterr()
+
+    assert exc_info.value.code == 2
+    assert captured.out == ""
+    assert "error" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_check_config_not_utf8(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    path = tmp_path / "not_utf8.json"
+    path.write_bytes(b"\xff\xfe\x00\x00")
+
+    exit_code = main(["check-config", str(path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert captured.out == ""
+    assert "Error" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_check_config_invalid_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    path = tmp_path / "invalid.json"
+    path.write_text("{invalid_json:}", encoding="utf-8")
+
+    exit_code = main(["check-config", str(path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert captured.out == ""
+    assert "Error" in captured.err
+    assert str(path) in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_check_config_default_log_level(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    path = tmp_path / "default_log_level.json"
+    path.write_text('{"environment": "development"}', encoding="utf-8")
+
+    exit_code = main(["check-config", str(path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert captured.out != ""
+    assert "log_level=INFO" in captured.out
+    assert captured.err == ""
+    assert "Error" not in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_check_config_wrong_log_level(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    path = tmp_path / "wrong_log_level.json"
+    path.write_text(
+        '{"environment": "development", "log_level": "VERBOSE"}', encoding="utf-8"
+    )
+
+    exit_code = main(["check-config", str(path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert captured.out == ""
+    assert "Error" in captured.err
+    assert "log_level" in captured.err
+    assert "Traceback" not in captured.err

@@ -1,0 +1,5 @@
+{
+    "environment": "development",
+    "log_level": "INFO",
+    "debug": true
+}
