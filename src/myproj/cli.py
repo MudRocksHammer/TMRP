@@ -4,6 +4,7 @@ from importlib.metadata import version
 from pathlib import Path
 
 from myproj.config import ConfigLoadError, ConfigValidationError, load_config
+from myproj.logging_config import configure_logging
 from myproj.models import TelemetryMessage, TelemetryValidationError
 
 
@@ -23,14 +24,27 @@ def main(argv: list[str] | None = None) -> int:
     )
     check_config_parser.add_argument("path", type=Path)
 
+    validate_parser.add_argument("--config", type=Path)
+
     args = parser.parse_args(argv)
 
     if args.command == "validate":
+        logger = None
+        if args.config:
+            try:
+                config = load_config(args.config)
+                logger = configure_logging(config)
+            except (ConfigValidationError, ConfigLoadError) as e:
+                print(f"Error: {e}", file=sys.stderr)
+                return 1
         try:
             text = args.path.read_text(encoding="utf-8")
             message = TelemetryMessage.from_json(text)
         except (OSError, UnicodeError, TelemetryValidationError) as e:
-            print(f"Error: {e}", file=sys.stderr)
+            if logger:
+                logger.error("Error %s:", e)
+            else:
+                print(f"Error: {e}", file=sys.stderr)
             return 1
 
         print(
@@ -38,6 +52,12 @@ def main(argv: list[str] | None = None) -> int:
             f"sequence_no={message.sequence_no} "
             f"event_time={message.event_time.isoformat()}"
         )
+        if logger:
+            logger.info(
+                f"device_id={message.device_id} "
+                f"sequence_no={message.sequence_no} "
+                f"event_time={message.event_time.isoformat()}"
+            )
         return 0
     elif args.command == "check-config":
         try:
@@ -49,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     print(f"Error: Unknown command {args.command}", file=sys.stderr)
+
     return 2
 
 

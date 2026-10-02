@@ -36,7 +36,8 @@ class AppConfig:
         }:
             raise ConfigValidationError(
                 "The 'log_level' field must be one of 'DEBUG', "
-                "'INFO', 'WARNING', 'ERROR', or 'CRITICAL'."
+                "'INFO', 'WARNING', 'ERROR', or 'CRITICAL'. "
+                f"Received: {self.log_level}"
             )
 
     @classmethod
