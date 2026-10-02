@@ -11,6 +11,7 @@
 - JSON serialization and deserialization
 - JSON Lines telemetry reader
 - Command-line interface
+- JSON application configuration loading and validation
 - Unit tests
 - Static type checking
 
@@ -66,10 +67,26 @@ bash scripts/check_test.sh
 ```
 
 ## Usage
+
+Run these commands from the TMRP directory with the virtual environment activated.
+
 #### Validate a telemetry JSON file:
+
 ```bash
-tmrp validate <filename>
+# 正常なTelemetry JSONを検証する
+tmrp validate examples/telemetry/valid.json
 ```
+
+#### Check an application configuration file:
+
+```bash
+# 設定ファイルを検証し、実行環境とログレベルを表示する
+tmrp check-config examples/config/valid.json
+```
+
+See [configuration instructions](docs/configuration.md) for fields, defaults,
+expected output, and exit codes. The command validates and displays settings;
+applying the log level to logging is planned.
 
 ## Development checks
 
@@ -87,6 +104,7 @@ See [verification instructions](docs/verification.md) for detailed checks.
 - Serialization and deserialization tests
 - JSON Lines stream tests
 - CLI tests
+- Configuration validation and file-loading tests
 #### Future tests layers:
 - MQTT integration tests
 - PostgreSQL integration tests
