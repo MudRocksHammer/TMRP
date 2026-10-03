@@ -12,6 +12,7 @@
 - JSON Lines telemetry reader
 - Command-line interface
 - JSON application configuration loading and validation
+- Configurable JSON logging for telemetry validation
 - Unit tests
 - Static type checking
 
@@ -84,9 +85,18 @@ tmrp validate examples/telemetry/valid.json
 tmrp check-config examples/config/valid.json
 ```
 
+#### Validate telemetry with configured JSON logging:
+
+```bash
+# 設定のログレベルを適用してTelemetryを検証する
+# 検証結果は標準出力、JSONログは標準エラーへ出る
+tmrp validate examples/telemetry/valid.json --config examples/config/valid.json
+```
+
+`check-config` validates and displays settings. `validate --config` applies the
+configured log level. Omitting `--config` preserves the plain-text CLI behavior.
 See [configuration instructions](docs/configuration.md) for fields, defaults,
-expected output, and exit codes. The command validates and displays settings;
-applying the log level to logging is planned.
+log format, expected output, and exit codes.
 
 ## Development checks
 
@@ -105,6 +115,7 @@ See [verification instructions](docs/verification.md) for detailed checks.
 - JSON Lines stream tests
 - CLI tests
 - Configuration validation and file-loading tests
+- JSON log formatting, level filtering, and repeated logging setup tests
 #### Future tests layers:
 - MQTT integration tests
 - PostgreSQL integration tests
