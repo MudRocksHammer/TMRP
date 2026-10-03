@@ -176,7 +176,7 @@ JSONの `message` に拒否理由と `device_id` が含まれる。
 |---|---|
 | `timestamp` | ログ生成時刻。UTCのISO 8601形式。Telemetryの `event_time` とは別の時刻 |
 | `level` | `INFO`、`ERROR` などのログレベル |
-| `logger` | 発生元のLogger名。CLIでは `myproj` |
+| `logger` | アプリがログに付ける名前。CLIでは `myproj` |
 | `message` | 正常時はdevice ID・連番・イベント時刻、異常時は原因を説明する文字列 |
 
 ログ1件はJSONオブジェクト1行で出力する。日本語はそのまま残し、メッセージ内の改行はJSONとしてエスケープする。
@@ -202,3 +202,29 @@ bash scripts/check_test.sh
 
 Python APIの `load_config(path: Path) -> AppConfig` は、読み込み失敗を `ConfigLoadError` に変換し、`raise ... from e` で原因を保持する。
 設定値の不正は `ConfigValidationError` として伝える。CLIがこれらを表示と終了コードへ変換する。
+
+
+## Loguruによる実装
+
+ログ出力にはLoguruを使用する。`pyproject.toml`の実行時依存関係に登録しているため、
+READMEの `python -m pip install -e ".[dev]"` で一緒にインストールされる。
+
+`configure_logging(config)` はLoguruの既存の出力先を取り除き、指定レベルのJSON出力先（sink）を1つ登録する。
+この関数がアプリ全体のLoguru出力先を管理するため、個別のモジュールで出力先を追加する必要はない。
+戻り値のLoggerには `bind(logger="myproj")` でログ上の名前を付ける。
+再設定しても同じログは重複しない。
+
+```python
+from myproj.config import AppConfig
+from myproj.logging_config import configure_logging
+
+logger = configure_logging(AppConfig(environment="development", log_level="INFO"))
+logger.info("設定を読み込みました: {}", "config.json")
+```
+
+Loguruの引数展開は `{}` を使う。標準loggingで使った `%s` は置き換える。
+既存の4項目のJSON形式を維持するため、独自のsinkでLoguruのレコードをJSONへ変換している。
+標準loggingの `JsonFormatter` はこのsinkに置き換わった。
+
+参考: [Loguru API](https://loguru.readthedocs.io/en/stable/api/logger.html)、
+[独自のJSON変換を行う公式レシピ](https://loguru.readthedocs.io/en/stable/resources/recipes.html#serializing-log-messages-using-a-custom-function)。

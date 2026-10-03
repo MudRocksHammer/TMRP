@@ -12,7 +12,7 @@
 - JSON Lines telemetry reader
 - Command-line interface
 - JSON application configuration loading and validation
-- Configurable JSON logging for telemetry validation
+- Configurable JSON logging with Loguru for telemetry validation
 - Unit tests
 - Static type checking
 

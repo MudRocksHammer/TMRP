@@ -1,6 +1,4 @@
 import json
-import logging
-from collections.abc import Iterator
 from importlib.metadata import version
 from pathlib import Path
 
@@ -303,32 +301,14 @@ def telemetry_path(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def config_path(tmp_path: Path) -> Iterator[Path]:
-    """設定ファイルを用意し、テスト後に共有Loggerの状態を戻す。"""
+def config_path(tmp_path: Path, reset_loguru: None) -> Path:
+    """設定ファイルを用意し、共有Loggerの後始末はreset_loguruに任せる。"""
     path = tmp_path / "config.json"
     path.write_text(
         json.dumps({"environment": "test", "log_level": "INFO"}),
         encoding="utf-8",
     )
-
-    # getLoggerは同じ名前のLoggerを再利用するため、テスト間の影響を防ぐ。
-    logger = logging.getLogger("myproj")
-    original_handlers = logger.handlers[:]
-    original_level = logger.level
-    original_propagate = logger.propagate
-    for handler in original_handlers:
-        logger.removeHandler(handler)
-    try:
-        yield path
-    finally:
-        # capsysの出力先を使うHandlerを、テスト終了時に取り外す。
-        for handler in logger.handlers[:]:
-            logger.removeHandler(handler)
-            handler.close()
-        for handler in original_handlers:
-            logger.addHandler(handler)
-        logger.setLevel(original_level)
-        logger.propagate = original_propagate
+    return path
 
 
 @pytest.mark.parametrize("log_level", ["INFO", "WARNING"])

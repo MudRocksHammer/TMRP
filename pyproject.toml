@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Telemetry Monitoring and Replay Platform"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["loguru>=0.7.3,<0.8"]
 
 [project.optional-dependencies]
 dev = [

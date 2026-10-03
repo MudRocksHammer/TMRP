@@ -41,8 +41,8 @@ def main(argv: list[str] | None = None) -> int:
             text = args.path.read_text(encoding="utf-8")
             message = TelemetryMessage.from_json(text)
         except (OSError, UnicodeError, TelemetryValidationError) as e:
-            if logger:
-                logger.error("Error %s:", e)
+            if logger is not None:
+                logger.error("Error: {}", e)
             else:
                 print(f"Error: {e}", file=sys.stderr)
             return 1
@@ -52,11 +52,12 @@ def main(argv: list[str] | None = None) -> int:
             f"sequence_no={message.sequence_no} "
             f"event_time={message.event_time.isoformat()}"
         )
-        if logger:
+        if logger is not None:
             logger.info(
-                f"device_id={message.device_id} "
-                f"sequence_no={message.sequence_no} "
-                f"event_time={message.event_time.isoformat()}"
+                "device_id={} sequence_no={} event_time={}",
+                message.device_id,
+                message.sequence_no,
+                message.event_time.isoformat(),
             )
         return 0
     elif args.command == "check-config":

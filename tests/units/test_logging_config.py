@@ -1,150 +1,125 @@
 import json
-import logging
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from myproj.config import AppConfig
-from myproj.logging_config import JsonFormatter, configure_logging
+from myproj.logging_config import configure_logging
+
+pytestmark = pytest.mark.usefixtures("reset_loguru")
 
 
-@pytest.fixture
-def log_record():
-    record = logging.LogRecord(
-        name="myproj.config",
-        level=logging.INFO,
-        pathname=__file__,
-        lineno=10,
-        msg="This is a test log message",
-        args=(),
-        exc_info=None,
-    )
-    record.created = 0.0
-    return record
+@pytest.mark.parametrize("level", ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
+def test_json_log_level(level, capsys):
+    logger = configure_logging(AppConfig(environment="test", log_level="DEBUG"))
+    logger.log(level, "テストメッセージ")
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert len(captured.err.splitlines()) == 1
+    output = json.loads(captured.err)
+    assert set(output) == {"level", "logger", "message", "timestamp"}
+    assert output["level"] == level
+    assert output["logger"] == "myproj"
+    assert output["message"] == "テストメッセージ"
 
 
-@pytest.mark.parametrize(
-    "level",
-    [logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR, logging.CRITICAL],
-)
-def test_logger_import_log_level(log_record, level):
-    record = log_record
-    record.levelno = level
-    record.levelname = logging.getLevelName(level)
+def test_json_timestamp_is_normalized_to_utc(capsys):
+    logger = configure_logging(AppConfig(environment="test"))
+    # UTC+9の時刻を渡し、同じ瞬間をUTCで表現することを確認する。
+    fixed_time = datetime(1970, 1, 1, 9, tzinfo=timezone(timedelta(hours=9)))
+    logger = logger.patch(lambda record: record.update(time=fixed_time))
+    logger.info("時刻の確認")
 
-    json_formatter = JsonFormatter()
-    json_output = json.loads(json_formatter.format(record))
-    assert json_output["level"] == logging.getLevelName(level)
-    assert json_output["logger"] == "myproj.config"
-    assert json_output["message"] == "This is a test log message"
-    assert json_output["timestamp"] == "1970-01-01T00:00:00+00:00"
+    output = json.loads(capsys.readouterr().err)
+    assert output["timestamp"] == "1970-01-01T00:00:00+00:00"
 
 
 @pytest.mark.parametrize(
     "message",
-    ["This is a test log message", "Another test message", "日本語で大丈夫かな"],
+    ["This is a test log message", '引用符: "value" と {braces}', "日本語で大丈夫かな"],
 )
-def test_logger_import_message(log_record, message):
-    record = log_record
-    record.msg = message
+def test_json_message_round_trip(message, capsys):
+    logger = configure_logging(AppConfig(environment="test"))
+    logger.info(message)
 
-    json_formatter = JsonFormatter()
-    json_output = json.loads(json_formatter.format(record))
-    assert json_output["message"] == message
-    assert json_output["logger"] == "myproj.config"
-    assert json_output["timestamp"] == "1970-01-01T00:00:00+00:00"
+    output = json.loads(capsys.readouterr().err)
+    assert output["message"] == message
 
 
-def test_logger_msg_parameter(log_record):
-    record = log_record
-    record.msg = "loaded: %s"
-    record.args = ("config.json",)
+def test_loguru_message_arguments(capsys):
+    logger = configure_logging(AppConfig(environment="test"))
+    logger.info("loaded: {}", "config.json")
 
-    json_output = json.loads(JsonFormatter().format(record))
-    assert "loaded: config.json" in json_output["message"]
-    assert json_output["logger"] == "myproj.config"
-    assert json_output["timestamp"] == "1970-01-01T00:00:00+00:00"
+    output = json.loads(capsys.readouterr().err)
+    assert output["message"] == "loaded: config.json"
 
 
-def test_logger_msg_japanese(log_record):
-    record = log_record
-    record.msg = "日本語のメッセージ: %s"
-    record.args = ("パラメータ",)
+def test_json_keeps_japanese_readable(capsys):
+    logger = configure_logging(AppConfig(environment="test"))
+    logger.info("日本語のメッセージ: {}", "パラメータ")
 
-    json_output = JsonFormatter().format(record)
-    assert "日本語のメッセージ: パラメータ" in json_output
-    assert json.loads(json_output)["message"] == "日本語のメッセージ: パラメータ"
-
-
-def test_logger_msg_no_line_break(log_record):
-    record = log_record
-    record.msg = "1行目\n2行目"
-
-    json_output = JsonFormatter().format(record)
-    assert "\n" not in json_output
-    assert json.loads(json_output)["message"] == "1行目\n2行目"
-    assert json.loads(json_output)["logger"] == "myproj.config"
-    assert json.loads(json_output)["timestamp"] == "1970-01-01T00:00:00+00:00"
+    text = capsys.readouterr().err
+    assert "日本語のメッセージ: パラメータ" in text
+    assert json.loads(text)["message"] == "日本語のメッセージ: パラメータ"
 
 
-def test_configure_logging(capsys):
-    config = AppConfig(environment="test", log_level="INFO")
-    logger = configure_logging(config)
+def test_message_newline_stays_inside_one_json_line(capsys):
+    logger = configure_logging(AppConfig(environment="test"))
+    logger.info("1行目\n2行目")
 
-    logger.debug("非表示")
-    logger.info("設定を読み込みました")
-
-    captured = capsys.readouterr()
-
-    assert logger.name == "myproj"
-    assert logger.level == logging.INFO
-    assert captured.out == ""
-    assert len(captured.err.splitlines()) == 1
-
-    output = json.loads(captured.err.splitlines()[0])
-    assert output["level"] == "INFO"
-    assert output["logger"] == "myproj"
-    assert output["message"] == "設定を読み込みました"
+    lines = capsys.readouterr().err.splitlines()
+    assert len(lines) == 1
+    assert json.loads(lines[0])["message"] == "1行目\n2行目"
 
 
-def test_configure_logging_debug(capsys):
-    config = AppConfig(environment="test", log_level="DEBUG")
-    logger = configure_logging(config)
-
-    logger.debug("デバッグメッセージ")
-    logger.info("情報メッセージ")
+@pytest.mark.parametrize(
+    ("configured_level", "expected_levels"),
+    [
+        ("DEBUG", ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]),
+        ("INFO", ["INFO", "WARNING", "ERROR", "CRITICAL"]),
+        ("WARNING", ["WARNING", "ERROR", "CRITICAL"]),
+        ("ERROR", ["ERROR", "CRITICAL"]),
+        ("CRITICAL", ["CRITICAL"]),
+    ],
+)
+def test_log_level_filters_output(configured_level, expected_levels, capsys):
+    logger = configure_logging(
+        AppConfig(environment="test", log_level=configured_level)
+    )
+    for level in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
+        logger.log(level, "{}のメッセージ", level)
 
     captured = capsys.readouterr()
-
-    assert logger.name == "myproj"
-    assert logger.level == logging.DEBUG
     assert captured.out == ""
-    assert len(captured.err.splitlines()) == 2
-
-    output_debug = json.loads(captured.err.splitlines()[0])
-    assert output_debug["level"] == "DEBUG"
-    assert output_debug["logger"] == "myproj"
-    assert output_debug["message"] == "デバッグメッセージ"
-
-    output_info = json.loads(captured.err.splitlines()[1])
-    assert output_info["level"] == "INFO"
-    assert output_info["logger"] == "myproj"
-    assert output_info["message"] == "情報メッセージ"
+    entries = [json.loads(line) for line in captured.err.splitlines()]
+    assert [entry["level"] for entry in entries] == expected_levels
+    assert [entry["message"] for entry in entries] == [
+        f"{level}のメッセージ" for level in expected_levels
+    ]
 
 
-def test_configure_logging_idempotent(capsys):
-    config = AppConfig(environment="test", log_level="INFO")
+def test_repeated_setup_does_not_duplicate_logs(capsys):
+    config = AppConfig(environment="test")
+    configure_logging(config)
     logger = configure_logging(config)
-    logger = configure_logging(config)
+    logger.info("一度だけ")
 
-    logger.info("設定を読み込みました")
-
-    assert logger is configure_logging(config)
-    assert logger.name == "myproj"
-    assert logger.level == logging.INFO
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert len(captured.err.splitlines()) == 1
-    output = json.loads(captured.err.splitlines()[0])
-    assert output["level"] == "INFO"
-    assert output["logger"] == "myproj"
-    assert output["message"] == "設定を読み込みました"
+    lines = captured.err.splitlines()
+    assert len(lines) == 1
+    assert json.loads(lines[0])["message"] == "一度だけ"
+
+
+def test_reconfiguration_updates_level_for_existing_logger(capsys):
+    logger = configure_logging(AppConfig(environment="test", log_level="INFO"))
+    configure_logging(AppConfig(environment="test", log_level="ERROR"))
+    logger.info("非表示")
+    logger.error("エラーのみ表示")
+
+    lines = capsys.readouterr().err.splitlines()
+    assert len(lines) == 1
+    output = json.loads(lines[0])
+    assert output["level"] == "ERROR"
+    assert output["message"] == "エラーのみ表示"
