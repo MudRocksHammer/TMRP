@@ -12,6 +12,8 @@
 | 項目 | 型 | 省略時 | 許可する値 |
 |---|---|---|---|
 | `environment` | 文字列 | 必須のためエラー | `development`、`test`、`production` |
+| `enqueue` | 布尔值 | `false` | `true` 开启文件与标准错误的后台队列写入；空值关闭 |
+| `log_file` | オブジェクト | ファイル出力なし | 下記のファイル出力設定を参照 |
 | `log_level` | 文字列 | `"INFO"` | `DEBUG`、`INFO`、`WARNING`、`ERROR`、`CRITICAL` |
 
 - 最上位はJSONオブジェクトとする。
@@ -209,7 +211,7 @@ Python APIの `load_config(path: Path) -> AppConfig` は、読み込み失敗を
 ログ出力にはLoguruを使用する。`pyproject.toml`の実行時依存関係に登録しているため、
 READMEの `python -m pip install -e ".[dev]"` で一緒にインストールされる。
 
-`configure_logging(config)` はLoguruの既存の出力先を取り除き、指定レベルのJSON出力先（sink）を1つ登録する。
+`configure_logging(config)` はLoguruの既存の出力先を取り除き、指定レベルのJSON標準エラー出力と、設定された場合はファイル出力を登録する。
 この関数がアプリ全体のLoguru出力先を管理するため、個別のモジュールで出力先を追加する必要はない。
 戻り値のLoggerには `bind(logger="myproj")` でログ上の名前を付ける。
 再設定しても同じログは重複しない。
@@ -223,8 +225,147 @@ logger.info("設定を読み込みました: {}", "config.json")
 ```
 
 Loguruの引数展開は `{}` を使う。標準loggingで使った `%s` は置き換える。
-既存の4項目のJSON形式を維持するため、独自のsinkでLoguruのレコードをJSONへ変換している。
+既存の4項目のJSON形式を維持するため、共通のformat関数でLoguruのレコードをJSONへ変換している。
 標準loggingの `JsonFormatter` はこのsinkに置き換わった。
 
 参考: [Loguru API](https://loguru.readthedocs.io/en/stable/api/logger.html)、
 [独自のJSON変換を行う公式レシピ](https://loguru.readthedocs.io/en/stable/resources/recipes.html#serializing-log-messages-using-a-custom-function)。
+
+
+## 文件日志配置与全局使用
+
+### 只初始化一次
+
+Loguru 提供进程内共享的 logger。程序入口读取配置并调用一次
+`configure_logging(config)`，随后所有模块直接导入 `loguru.logger` 即可。
+`bind()` 创建带上下文的 logger，仍共享相同输出配置，不会重新读配置或创建日志文件。
+不要在每个模块调用 `configure_logging()`：该函数用于启动或主动重新配置，会移除已有输出。
+多个独立进程需分别初始化；本功能面向单进程、多线程使用。
+
+入口 `main.py`：
+
+```python
+from pathlib import Path
+from myproj.config import load_config
+from myproj.logging_config import configure_logging
+from worker import run
+
+logger = configure_logging(load_config(Path("examples/config/file-logging.json")))
+logger.info("程序启动")
+run()
+```
+
+其他模块 `worker.py`：
+
+```python
+from loguru import logger
+
+worker_logger = logger.bind(logger="worker")
+
+def run():
+    worker_logger.info("处理任务：{}", "task-001")
+```
+
+### 完整配置示例
+
+可运行示例：[file-logging.json](../examples/config/file-logging.json)。
+
+```json
+{
+  "environment": "development",
+  "log_level": "INFO",
+  "enqueue": true,
+  "log_file": {
+    "path": "logs/app_{time:YYYY-MM-DD_HH-mm-ss}.jsonl",
+    "max_bytes": 10485760,
+    "rotation_interval_seconds": 3600,
+    "rotation_time": "00:00",
+    "cleanup_days": 7,
+    "compression": "zip",
+    "delay": false
+  }
+}
+```
+
+| 配置项 | 默认值 | 含义 |
+|---|---|---|
+| `path` | 必填 | 文件路径；相对路径基于当前工作目录，父目录自动创建。支持 `{time:YYYY-MM-DD_HH-mm-ss}` 文件名时间模板 |
+| `max_bytes` | `null` | 正整数，当前文件加上新日志超过此字节数时轮转。例如 10485760 为 10 MiB |
+| `rotation_interval_seconds` | `null` | 正整数，从初始化或上次轮转起经过多少秒创建新文件 |
+| `rotation_time` | `null` | 每日轮转时间，严格使用 `HH:MM`，例如 `00:00` 或 `03:30`，采用运行机器的本地时区 |
+| `cleanup_days` | `null` | 正整数，删除修改时间早于指定天数的日志归档，包括压缩归档 |
+| `compression` | `null` | 归档压缩格式：`zip`、`gz`、`bz2`、`xz`；`null` 表示不压缩 |
+| `delay` | `false` | `false` 在初始化时创建文件；`true` 延迟到第一条符合日志级别的日志才创建 |
+
+省略整个 `log_file` 时只输出标准错误。提供它时必须是对象；未知字段、空路径、
+非正整数、无效时间及压缩格式会在读取配置时拒绝。大小、轮转间隔、每日轮转时间、保留天数和压缩格式的字段省略、`null`、
+空字符串 `""` 或纯空白字符串均表示关闭对应功能。`delay` 同样接受空值，
+按 `false` 处理，即关闭延迟创建；非空值必须是布尔值。
+所有这些选项为空时，日志仍写入 `path` 指定的文件，但不轮转、不清理、不压缩。
+`path` 仍必须是非空路径；数字 `0` 和负数属于无效参数，会报错。
+
+大小、间隔、每日时间可以同时配置，任意一个条件满足就轮转。
+只需按大小轮转时，省略两个时间字段；只需每日轮转时，省略大小和间隔字段。
+无轮转条件时持续追加同一文件。已有文件默认追加，不覆盖。
+固定路径如 `logs/app.jsonl` 会由 Loguru 自动给旧文件添加时间后缀，避免覆盖归档。
+单条日志不拆分，因此单条日志大于大小上限时，文件仍可能超过该上限。
+
+轮转检查发生在写入日志之前，不启动后台定时器。每日时间或间隔到达后，
+下一条符合级别的日志触发创建新文件。时间模板使用实际文件创建时间；
+JSON 中的 `timestamp` 仍使用 UTC。
+
+`cleanup_days` 是保留期限，不是每隔几天运行一次清理的周期。
+有轮转策略时，Loguru 在轮转时压缩并清理旧文件；没有轮转策略时，在输出关闭时执行。
+程序退出或调用 `logger.remove()` 会关闭输出。空闲时不会自动清理；
+若需要无日志时也在固定时间清理，应使用外部定时任务。
+清理仅针对该文件路径模板匹配的文件，因此请为此 logger 使用专用文件名。
+
+文件与标准错误输出使用相同日志级别和四字段 JSON Lines 格式，中文直接保留。
+默认立即创建文件时，路径权限等初始化错误由 CLI 显示为普通错误并返回 1；
+延迟创建模式下的路径错误发生在第一条日志写入时。
+
+### 命令行使用
+
+在 TMRP 目录中执行：
+
+```bash
+# 验证配置，不创建日志文件
+.venv/bin/tmrp check-config examples/config/file-logging.json
+
+# 标准错误和日志文件中同时记录验证结果
+.venv/bin/tmrp validate examples/telemetry/valid.json --config examples/config/file-logging.json
+```
+
+实现采用 [Loguru 的文件 sink、轮转、保留和压缩接口](https://loguru.readthedocs.io/en/stable/api/logger.html)。
+
+
+### 异步日志（后台队列写入）
+
+在 JSON 最上层添加 `"enqueue": true`，同时开启文件和标准错误的后台队列写入。
+省略、`false`、`null`、`""` 或纯空白字符串均关闭异步，保持同步输出。
+非空值只接受 JSON 布尔值；`"true"` 和 `1` 会报配置错误。
+即使不配置文件输出，该选项也可用于标准错误输出。
+
+业务代码仍使用 `logger.info()` 等普通调用，无需 `await`。日志格式化和入队在调用线程完成，
+实际写入由后台线程执行；它减少业务等待磁盘的时间，但不保证调用完全不阻塞。
+后台写入错误不能作为异常返回给原来的业务调用，会由 Loguru 报告到标准错误。
+
+程序结束前使用 `finally` 等待已入队日志写完：
+
+```python
+from pathlib import Path
+from myproj.config import load_config
+from myproj.logging_config import configure_logging
+
+logger = configure_logging(load_config(Path("examples/config/file-logging.json")))
+try:
+    logger.info("程序启动")
+    # 执行业务逻辑
+finally:
+    logger.complete()
+```
+
+`logger.complete()` 等待队列写完，不关闭输出。需要关闭输出时使用 `logger.remove()`。
+CLI 的 `validate` 已在成功及失败返回前自动等待队列完成。
+异步模式继续支持原有轮转、清理、压缩和全局复用。
+参考：[Loguru enqueue 与 complete API](https://loguru.readthedocs.io/en/stable/api/logger.html)。
