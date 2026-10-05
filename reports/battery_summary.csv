@@ -1,0 +1,3 @@
+device_id,message_count,battery_count,battery_mean,battery_min,battery_max,battery_missing
+robot-001,6,5,95.2,90.0,100.0,1
+robot-002,6,5,75.6,70.0,80.0,1

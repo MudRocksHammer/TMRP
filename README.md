@@ -13,13 +13,14 @@
 - Command-line interface
 - JSON application configuration loading and validation
 - Configurable JSON logging with Loguru for telemetry validation
+- Sample telemetry analysis with NumPy, Pandas, and a reproducible Notebook
 - Unit tests
 - Static type checking
 
 #### Planned implementations:
 - MQTT collector
 - PostgreSQL storage
-- Telemetry analytics
+- Extended telemetry analytics
 - Alarm processing
 - Telemetry replay
 - C++ device simulator
@@ -97,6 +98,9 @@ tmrp validate examples/telemetry/valid.json --config examples/config/valid.json
 configured log level. Omitting `--config` preserves the plain-text CLI behavior.
 See [configuration instructions](docs/configuration.md) for fields, defaults,
 log format, expected output, and exit codes.
+
+See [telemetry analysis instructions](docs/analysis.md) for analysis setup,
+execution steps, CSV outputs, and expected results.
 
 ## Development checks
 
