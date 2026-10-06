@@ -1,0 +1,3 @@
+device_id,event_time,message_count,battery_count,battery_mean,battery_min,battery_max,battery_missing,battery_missing_rate
+robot-001,2026-10-01 00:00:00+00:00,6,5,95.2,90.0,100.0,1,0.16666666666666666
+robot-002,2026-10-01 00:00:00+00:00,6,5,75.6,70.0,80.0,1,0.16666666666666666

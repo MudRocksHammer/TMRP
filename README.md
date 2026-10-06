@@ -14,6 +14,7 @@
 - JSON application configuration loading and validation
 - Configurable JSON logging with Loguru for telemetry validation
 - Sample telemetry analysis with NumPy, Pandas, and a reproducible Notebook
+- Battery trend plots, time-based summaries, and UTC/Japan time zone comparison
 - Unit tests
 - Static type checking
 
@@ -100,7 +101,7 @@ See [configuration instructions](docs/configuration.md) for fields, defaults,
 log format, expected output, and exit codes.
 
 See [telemetry analysis instructions](docs/analysis.md) for analysis setup,
-execution steps, CSV outputs, and expected results.
+execution steps, plots, CSV reports, and expected results.
 
 ## Development checks
 
