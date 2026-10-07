@@ -15,11 +15,12 @@
 - Configurable JSON logging with Loguru for telemetry validation
 - Sample telemetry analysis with NumPy, Pandas, and a reproducible Notebook
 - Battery trend plots, time-based summaries, and UTC/Japan time zone comparison
+- Local MQTT publisher and subscriber with topic and payload validation
 - Unit tests
 - Static type checking
 
 #### Planned implementations:
-- MQTT collector
+- Persistent MQTT collection and duplicate handling
 - PostgreSQL storage
 - Extended telemetry analytics
 - Alarm processing
@@ -31,10 +32,12 @@
 - Python 3.12 or later
 - Git
 - Linux or WSL
+### Local MQTT examples also require:
+- Mosquitto 2.x or later and Mosquitto clients
+
 ### Future components may require:
 - C++ 17 compiler
 - CMake
-- Mosquitto
 - PostgreSQL
 - Docker
 
@@ -103,6 +106,9 @@ log format, expected output, and exit codes.
 See [telemetry analysis instructions](docs/analysis.md) for analysis setup,
 execution steps, plots, CSV reports, and expected results.
 
+See [MQTT instructions](docs/mqtt.md) for local broker setup, two-device publishing,
+input validation, and shutdown steps.
+
 ## Development checks
 
 ```bash
@@ -119,6 +125,7 @@ See [verification instructions](docs/verification.md) for detailed checks.
 - Serialization and deserialization tests
 - JSON Lines stream tests
 - CLI tests
+- MQTT topic and payload validation tests (without a broker)
 - Configuration validation and file-loading tests
 - JSON log formatting, level filtering, and repeated logging setup tests
 #### Future tests layers:
