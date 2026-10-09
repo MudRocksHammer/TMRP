@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from typing import Any
 
 from psycopg import Connection
@@ -29,3 +30,16 @@ def insert_telemetry(
 
     row = conn.execute(sql, values).fetchone()
     return row is not None
+
+
+def insert_telemetry_batch(
+    conn: Connection[tuple[Any, ...]],
+    messages: Iterable[TelemetryMessage],
+) -> int:
+    inserted_count = 0
+    with conn.transaction():
+        for message in messages:
+            row = insert_telemetry(conn, message)
+            if row:
+                inserted_count += 1
+    return inserted_count

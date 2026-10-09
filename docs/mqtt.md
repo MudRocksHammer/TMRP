@@ -1,14 +1,16 @@
 # MQTT送受信の再現手順
 
 ローカルのMosquitto Brokerを介し、Pythonシミュレーターから2台分のTelemetryを送信する。
-Python受信側はトピックとJSON本文を検証し、正常データを表示する。不正データは理由を表示して拒否し、次の受信を続ける。
+Python受信側はトピックとJSON本文を検証し、正常データを3件ずつPostgreSQLへ保存する。
+不正データは理由を表示して拒否し、次の受信を続ける。Ctrl+Cで終了すると残件も保存する。
 
 ```text
 publish_telemetry.py → Mosquitto → subscribe_telemetry.py
-                                  └ parse_mqtt_telemetry → TelemetryMessage
+                                  └ 検証 → 受信バッファ → 一括保存 → PostgreSQL
 ```
 
-現在は学習用の送受信スクリプト。DB・ファイルへの受信データ保存や重複排除はまだ実装していない。
+現在はローカル学習用の送受信・保存スクリプト。同じイベントキーの再送はDBでスキップする。
+DBとテーブルの準備は[PostgreSQL保存手順](storage.md)を先に完了させる。
 
 ## 準備
 
@@ -27,8 +29,10 @@ sudo apt install mosquitto mosquitto-clients
 .venv/bin/python -m pip install -e ".[dev]"
 ```
 
-`paho-mqtt`は本体の依存関係に含まれる。MQTTの課題だけならanalysis追加依存関係は不要。
-接続先は送受信スクリプト内で`127.0.0.1:18883`に固定している。
+`paho-mqtt`と`psycopg[binary]`は本体の依存関係に含まれる。analysis追加依存関係は不要。
+subscriberは起動時にDBへ接続するため、PostgreSQLも起動しておく。
+DB接続先はソケット`/var/run/postgresql`、ポート5432、DB`tmrp_dev`、ロール`shou`。
+MQTT接続先は送受信スクリプト内で`127.0.0.1:18883`に固定している。
 標準ポート1883とは別の学習用ポートを使う。
 
 ## 1. Brokerを起動する（ターミナルA）
@@ -38,6 +42,7 @@ sudo apt install mosquitto mosquitto-clients
 mosquitto -p 18883 -v
 ```
 
+すでに18883で起動しているBrokerがある場合は二重起動せず、そのBrokerを使う。
 この端末は起動したままにする。設定ファイルを渡さずこの方法で起動したMosquitto 2系以降は、ループバックで待ち受ける。
 [Brokerの公式説明](https://mosquitto.org/man/mosquitto-8.html)
 
@@ -46,20 +51,24 @@ mosquitto -p 18883 -v
 TMRPのルートから実行する。
 
 ```bash
-# 全デバイスのTelemetryを購読し、検証結果を表示する
+# 全デバイスのTelemetryを購読し、検証後に3件ずつDBへ保存する
 .venv/bin/python scripts/subscribe_telemetry.py
 ```
 
 `brokerに接続しました`と表示される。
 この表示は購読要求を出した時点のもので、購読完了の確認ではない。
 ターミナルAで該当クライアントへの`Sending SUBACK`を確認してから送信する。
-受信側は起動したままにする。
+受信側は起動したままにする。古いsubscriberは事前に終了し、受信側は1つだけ起動する。
 
 ## 3. 2台分を送信する（ターミナルC）
 
 TMRPのルートから実行する。
 
 ```bash
+# 送信前のDB件数をNとしてメモする。-Xは個人設定を読み込まず、-cはSQLを実行する。
+psql -X -h /var/run/postgresql -p 5432 -U shou -d tmrp_dev \
+  -c 'SELECT COUNT(*) FROM telemetry_messages;'
+
 # robot-001とrobot-002のTelemetryを各5件送信する
 .venv/bin/python scripts/publish_telemetry.py
 ```
@@ -84,11 +93,40 @@ TMRPのルートから実行する。
 | 間隔 | 2台分の送信完了後に1秒待つ。最終回は待たない |
 | 配信設定 | QoS 1、retain=False |
 
-通常のローカル接続では、受信側に`解析成功:`が合計10件表示される。
-各デバイスの連番1〜5と、`解析失敗:`が出ていないことを確認する。
+通常のローカル接続で他の送信がない場合、受信側に次の表示が3回出る。
+
+```text
+フラッシュ完了: 3 件のメッセージを保存しました,  重複=0
+```
+
+この時点では9件を保存し、残り1件はメモリで待機している。
+表示を確認してから、ターミナルCでDB件数を確認する。
+
+```bash
+# 受信側の3回の保存が完了した後、N+9件になっていることを確認する。
+psql -X -h /var/run/postgresql -p 5432 -U shou -d tmrp_dev \
+  -c 'SELECT COUNT(*) FROM telemetry_messages;'
+```
+
+続いてターミナルBでCtrl+Cを押す。`終了します`の後に1件保存の表示が出る。
+
+```bash
+# 受信側が終了した後、残り1件を含めてN+10件になっていることを確認する。
+psql -X -h /var/run/postgresql -p 5432 -U shou -d tmrp_dev \
+  -c 'SELECT COUNT(*) FROM telemetry_messages;'
+```
+
+| タイミング | DB件数 |
+|---|---:|
+| 送信前 | N |
+| 10件受信後、Ctrl+C前 | N + 9 |
+| Ctrl+C後 | N + 10 |
+
+既存データは削除せず、増分で確認する。QoS 1の再配信が実際に発生した場合は、
+重複もバッファ件数に含まれるため保存タイミングが変わり得るが、終了後の新規イベントは合計10件。
 時刻は実行ごとに変わり、送信処理にかかる時間もあるため厳密な1秒周期ではない。
 
-`publish.multiple()`は毎回接続し、2件を送信して切断する。送信側の完了は受信側の検証成功を保証しないので、両方の表示を確認する。
+`publish.multiple()`は毎回接続し、2件を送信して切断する。送信側の完了は受信側のDB保存成功を保証しないので、受信側の表示とDB件数も確認する。
 [送信ヘルパーの公式説明](https://eclipse.dev/paho/files/paho.mqtt.python/html/helpers.html)
 
 ## トピックと本文の規約
@@ -104,12 +142,15 @@ TMRPのルートから実行する。
 4. トピックのデバイスIDと本文の`device_id`が一致すること。
 
 成功時は`TelemetryMessage`を返す。不正UTF-8は`UnicodeDecodeError`、トピック・JSON・モデルの検証失敗は`TelemetryValidationError`になる。
-受信コールバックが両方を捕捉し、標準エラーに`解析失敗:`を表示する。成功は標準出力に表示する。
+受信コールバックが両方を捕捉し、標準エラーに`解析失敗:`を表示する。一括保存結果は標準出力に表示する。正常入力ごとの表示は行わない。
 現在の送受信スクリプトはprintを使用し、CLIのJSONログ設定は適用しない。
 
 ## 4. 不正入力の後も受信できるか確認する
 
-BrokerとPython受信側を起動したまま、ターミナルCから順に送信する。
+Brokerは起動したまま、ターミナルBでsubscriberを再起動する。
+購読完了を確認してから、ターミナルCで以下を実行する。これにより空のバッファから確認する。
+`mosquitto_pub`の`-h/-p`はBroker、`-t`はトピック、`-q 1`はQoS 1、
+`-m`は本文、`-f`は本文ファイル、`-s`は標準入力を指定する。
 
 ```bash
 # JSONとして解析できない本文を送信する
@@ -130,14 +171,18 @@ mosquitto_pub -h 127.0.0.1 -p 18883 \
   -t 'tmrp/devices/robot-002/telemetry' \
   -q 1 -f examples/telemetry/valid.json
 
-# 正常なトピックへ送信し、拒否後も受信できることを確認する
-mosquitto_pub -h 127.0.0.1 -p 18883 \
-  -t 'tmrp/devices/robot-001/telemetry' \
-  -q 1 -f examples/telemetry/valid.json
+# 同じ正常サンプルを3回送り、拒否後の受信継続と重複スキップを確認する。
+for attempt in 1 2 3; do
+  mosquitto_pub -h 127.0.0.1 -p 18883 \
+    -t 'tmrp/devices/robot-001/telemetry' \
+    -q 1 -f examples/telemetry/valid.json
+done
 ```
 
-期待結果は、4件の`解析失敗:`の後に1件の`解析成功:`が表示され、受信側が終了しないこと。
-最後のサンプルは`device_id=robot-001`、`sequence_no=1001`。
+期待結果は、4件の`解析失敗:`の後に一括保存結果が表示され、受信側が終了しないこと。
+固定サンプルが未保存なら新規1件・重複2件、保存済みなら新規0件・重複3件。
+不正入力はバッファへ追加されない。同じ3回送信をもう一度行うと、新規0件・重複3件になる。
+サンプルは`device_id=robot-001`、`sequence_no=1001`。
 このvalid.jsonは固定サンプルなので、event_timeも固定値であり現在時刻ではない。
 
 購読フィルターに一致しないトピックはコールバックへ届かない。
@@ -158,22 +203,28 @@ mosquitto_pub -h 127.0.0.1 -p 18883 \
 # src内をstrict設定で型検査する
 .venv/bin/python -m mypy
 
-# 既存機能を含む全テストを実行する
-.venv/bin/python -m pytest -q
+# DBテストも含む全テストを実行する。接続先はこのコマンドに限って指定する。
+TMRP_TEST_DSN='host=/var/run/postgresql port=5432 dbname=tmrp_dev user=shou' \
+  .venv/bin/python -m pytest -q
 ```
 
+`TMRP_TEST_DSN`未設定ではDBテスト7件はskipする。DBテストは一時テーブルを使う。
 単体テストはBrokerとの実通信を検証しない。送受信の確認には上記の3端末による手順も実行する。
 `scripts/check_test.sh`のRuff対象はsrcとtestsのみなので、送受信スクリプトは上記コマンドで検査する。
 
 ## 終了方法と現在の制約
 
-送信側は5回の送信後に終了する。受信側はターミナルBでCtrl+Cを押すと`終了します`を表示し、切断する。
+送信側は5回の送信後に終了する。受信側はターミナルBでCtrl+Cを押すと`終了します`を表示し、残件を保存してから切断する。
+DB保存で例外が起きた場合もfinallyでMQTTを切断し、DB接続を閉じる。
 最後にターミナルAでCtrl+Cを押して、手動起動したBrokerを停止する。
 Ubuntuパッケージのインストールで別途起動した標準ポート1883のサービスがある場合、この操作ではそのサービスは停止しない。
 
 - retain=Falseなので、新しく購読を始めたクライアントへ過去の送信内容は再配信されない。受信側を先に起動する。
-- QoS 1では再送による重複が起こり得る。現段階の受信側は重複排除を行わない。
-- 実行し直すと連番は1へ戻る。将来の永続化では、再起動と重複を区別する設計が必要。
+- QoS 1の再送は、同じ`(device_id, event_time, sequence_no)`ならDBでスキップする。
+- シミュレーターを実行し直すと連番は1へ戻るが、event_timeが変わるので新規イベントになる。
+- 3件未満ではCtrl+Cまでメモリに残る。時間によるflushは未実装。
+- Pahoの既定動作ではコールバック終了後に受信確認が送られる。バッファ中のデータがDB保存済みとは限らず、強制終了時の配送保証はない。[Paho公式資料](https://eclipse.dev/paho/files/paho.mqtt.python/html/client.html)
+- DBエラーは握りつぶさず終了する。保存失敗時にpendingを空にはしないが、プロセス終了を越えて保持する仕組みや自動再試行はない。
 - Broker停止時の再接続・再送や、接続失敗時の運用向けエラー処理は、今回の検証範囲に含めていない。
 
 ## 困ったとき
@@ -182,6 +233,8 @@ Ubuntuパッケージのインストールで別途起動した標準ポート18
 |---|---|
 | 接続を拒否される | Brokerが起動しているか、送受信側とも127.0.0.1:18883を使っているか |
 | Address already in use | 同じポートでBrokerがすでに動いていないか。既存Brokerを使う場合は二重起動しない |
+| DB接続・テーブルのエラー | [保存手順](storage.md)でDB起動、ロール、接続先、スキーマ適用を確認する |
+| 正常な1〜2件を送ったがDBにない | 3件到達時またはCtrl+C終了時に保存する。バッファ待機中か確認する |
 | 送信は終了したが受信表示がない | 受信側の購読完了後に送ったか、トピックがtrmpではなくtmrpか |
 | 修正後も以前と同じエラーになる | ファイルを保存し、動作中の受信スクリプトをCtrl+Cで終了して再起動したか |
 | 不正UTF-8で受信側が終了する | tryの外でpayload.decode()を呼んでいないか |
