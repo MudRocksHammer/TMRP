@@ -1,34 +1,10 @@
 import sys
-from dataclasses import dataclass, field
-from typing import Any
 
 import paho.mqtt.client as mqtt
 import psycopg
-from psycopg import Connection
 
-from myproj.models import TelemetryMessage, TelemetryValidationError
-from myproj.mqtt_validation import parse_mqtt_telemetry
-from myproj.storage import insert_telemetry_batch
-
-
-@dataclass
-class CollectionState:
-    conn: Connection[tuple[Any, ...]]
-    pending: list[TelemetryMessage] = field(default_factory=list)
-
-
-def flush_pending(state: CollectionState) -> None:
-    if not state.pending:
-        return
-
-    conn = state.conn
-    total = len(state.pending)
-    inserted = insert_telemetry_batch(conn, state.pending)
-    print(
-        "フラッシュ完了: "
-        f"{inserted} 件のメッセージを保存しました,  重複={total - inserted}"
-    )
-    state.pending.clear()
+from myproj.collector import CollectionState, collect_telemetry, run_collector
+from myproj.models import TelemetryValidationError
 
 
 def on_connect(client, userdata, flags, reason_code, properties):
@@ -44,11 +20,7 @@ def on_connect(client, userdata, flags, reason_code, properties):
 def on_message(client, userdata, message):
     # トピックと、UTF-8として読み取った本文を表示する
     try:
-        telemetry_message = parse_mqtt_telemetry(message.topic, message.payload)
-        state = userdata
-        state.pending.append(telemetry_message)
-        if len(state.pending) >= 3:
-            flush_pending(state)
+        collect_telemetry(userdata, message.topic, message.payload)
     except (UnicodeDecodeError, TelemetryValidationError) as e:
         print(f"解析失敗: {e}", file=sys.stderr)
         return
@@ -69,13 +41,7 @@ def main() -> None:
         client.on_message = on_message
 
         client.connect("127.0.0.1", 18883, keepalive=60)
-        try:
-            client.loop_forever()
-        except KeyboardInterrupt:
-            print("終了します")
-            flush_pending(state)
-        finally:
-            client.disconnect()
+        run_collector(client, state)
 
 
 if __name__ == "__main__":
