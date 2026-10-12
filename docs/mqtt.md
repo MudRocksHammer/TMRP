@@ -145,6 +145,10 @@ psql -X -h /var/run/postgresql -p 5432 -U shou -d tmrp_dev \
 受信コールバックが両方を捕捉し、標準エラーに`解析失敗:`を表示する。一括保存結果は標準出力に表示する。正常入力ごとの表示は行わない。
 現在の送受信スクリプトはprintを使用し、CLIのJSONログ設定は適用しない。
 
+`src/myproj/collector.py`が受信バッファと一括保存、受信ループの終了処理を担当する。
+`collect_telemetry`は検証例外を呼び出し元へ伝え、subscriberの`on_message`が捕捉して表示する。
+`run_collector`はCtrl+Cで残件を保存し、保存失敗時もfinallyでMQTTを切断する。
+
 ## 4. 不正入力の後も受信できるか確認する
 
 Brokerは起動したまま、ターミナルBでsubscriberを再起動する。
@@ -194,6 +198,9 @@ done
 # Brokerを起動せず、MQTT検証関数の正常・異常ケースをテストする
 .venv/bin/python -m pytest tests/units/test_mqtt_validation.py -v
 
+# DBとBrokerの代役を使い、バッファ・例外伝播・終了処理11ケースをテストする
+.venv/bin/python -m pytest tests/units/test_collector.py -v
+
 # 本体・テスト・スクリプトのコード規約を、自動修正せず確認する
 .venv/bin/python -m ruff check src tests scripts
 
@@ -208,9 +215,12 @@ TMRP_TEST_DSN='host=/var/run/postgresql port=5432 dbname=tmrp_dev user=shou' \
   .venv/bin/python -m pytest -q
 ```
 
-`TMRP_TEST_DSN`未設定ではDBテスト7件はskipする。DBテストは一時テーブルを使う。
-単体テストはBrokerとの実通信を検証しない。送受信の確認には上記の3端末による手順も実行する。
-`scripts/check_test.sh`のRuff対象はsrcとtestsのみなので、送受信スクリプトは上記コマンドで検査する。
+`TMRP_TEST_DSN`未設定ではDBテスト10件はskipする。DBテストは一時テーブルを使う。
+collectorの単体テストは保存処理とクライアントをMockにし、DB統合テストは一時テーブルを使用する。
+どちらもBrokerとの実通信を検証しない。送受信の確認には上記の3端末による手順も実行する。
+`bash scripts/check_test.sh --db`でもローカルDBを含む検査を実行できる。
+接続先の指定方法は[保存手順](storage.md#検査スクリプトの使い方)を参照する。
+スクリプトのRuff対象はsrcとtestsのみなので、送受信スクリプトは上記コマンドで検査する。
 
 ## 終了方法と現在の制約
 

@@ -143,10 +143,14 @@ duplicate handling, transaction behavior, and database tests.
 ```bash
 # 書式を自動修正し、lint・型チェック・テストを実行する
 bash scripts/check_test.sh
+
+# ローカルPostgreSQLを含めて同じ検査を実行する
+bash scripts/check_test.sh --db
 ```
 
-Uses Ruff, mypy, and pytest. Database tests are skipped unless `TMRP_TEST_DSN`
-is set; see [database test instructions](docs/storage.md#dbテストと品質チェック).
+Uses Ruff, mypy, and pytest. `--db` uses the local learning database. Without it,
+database tests run only when `TMRP_TEST_DSN` is set to a non-empty value; see
+[database test instructions](docs/storage.md#dbテストと品質チェック).
 See [verification instructions](docs/verification.md) for detailed checks.
 
 ## Testing Strategy
@@ -158,7 +162,8 @@ See [verification instructions](docs/verification.md) for detailed checks.
 - JSON Lines stream tests
 - CLI tests
 - MQTT topic and payload validation tests (without a broker)
-- PostgreSQL integration tests for insertion, duplicates, batches, and rollback
+- Collector unit tests for buffering, validation failures, database errors, and shutdown
+- PostgreSQL integration tests for storage and collector batching, duplicates, and rollback
 - Configuration validation and file-loading tests
 - JSON log formatting, level filtering, and repeated logging setup tests
 

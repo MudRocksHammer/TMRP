@@ -1,6 +1,6 @@
 # PostgreSQL保存の再現手順
 
-Week 6で実装したスキーマ、重複スキップ、一括保存、DBテストを再現する。
+Week 6のスキーマ・重複スキップ・一括保存と、Week 7で追加した単体／DB統合テストを再現する。
 MQTTからの送受信と終了時保存は[MQTT手順](mqtt.md)を参照する。
 コマンドはTMRPのルートで実行する。
 
@@ -127,11 +127,14 @@ psql -X -w -h /var/run/postgresql -p 5432 -U shou -d tmrp_dev \
 ## DBテストと品質チェック
 
 ```bash
-# テスト用接続先をこのコマンドに限って指定し、DBテスト7件を詳細表示で実行する。
-TMRP_TEST_DSN='host=/var/run/postgresql port=5432 dbname=tmrp_dev user=shou' \
-  .venv/bin/python -m pytest tests/integration/test_storage.py -v
+# DBやBrokerへ接続せず、collectorのバッファ・例外・終了処理11ケースを検証する。
+.venv/bin/python -m pytest tests/units/test_collector.py -v
 
-# DBテストを含む全テストを実行する。Week 6仕上げ時点では251 passed。
+# 接続先をこのコマンドに限って設定し、DB統合テスト10件を実行する。
+TMRP_TEST_DSN='host=/var/run/postgresql port=5432 dbname=tmrp_dev user=shou' \
+  .venv/bin/python -m pytest tests/integration -v
+
+# DBテストを含む全テストを実行する。2026-10-12時点で265 passed。
 TMRP_TEST_DSN='host=/var/run/postgresql port=5432 dbname=tmrp_dev user=shou' \
   .venv/bin/python -m pytest -q
 
@@ -143,15 +146,47 @@ TMRP_TEST_DSN='host=/var/run/postgresql port=5432 dbname=tmrp_dev user=shou' \
 .venv/bin/python -m mypy
 ```
 
-`TMRP_TEST_DSN`を設定しない場合、DBテスト7件はskipする。DB検証の成功と混同しない。
+`TMRP_TEST_DSN`が未設定または空の場合、DB統合テスト10件はskipする。
 設定した接続先へ接続できない場合は失敗する。
-fixtureはテストごとに一時テーブルを作り、`search_path=pg_temp`で検索先を限定する。
+共有fixtureは[tests/integration/conftest.py](../tests/integration/conftest.py)にある。
+テストごとに一時テーブルを作り、`search_path=pg_temp`で検索先を限定する。
 接続を閉じると一時テーブルは消える。既存のpublicテーブルには書き込まない。
 テスト用DBロールにはDBへの接続と一時テーブル作成権限が必要。
 
-7件は単件保存・重複・呼び出し側ロールバック、一括保存・重複・空入力・途中例外を検証する。
-subscriberのバッファや終了処理の自動テストは、現時点ではpytestに未追加。
-MQTTを含む確認は[通し確認](mqtt.md)で行う。
+| テストファイル | 件数 | 検証内容 |
+|---|---:|---|
+| [units/test_collector.py](../tests/units/test_collector.py) | 11 | 保存関数やMQTTクライアントをMockにし、空入力・重複表示・件数境界・不正入力・DBエラー・Ctrl+C・終了時の切断を検証 |
+| [integration/test_storage.py](../tests/integration/test_storage.py) | 7 | 実DBで単件／一括保存、重複、空入力、トランザクションの取り消しを検証 |
+| [integration/test_collector_integration.py](../tests/integration/test_collector_integration.py) | 3 | 実DBで2件まで未保存、3件で保存、保存内容と順序、バッファ解放、重複、DB制約違反時の一括ロールバックを検証 |
 
-`scripts/check_test.sh`はsrc/testsを自動整形して検査する。DBテストも実行する場合は
-同様に`TMRP_TEST_DSN`を渡す。スクリプト自身は環境変数を設定せず、scriptsのRuff検査も行わない。
+統合テストの制約違反は、一時テーブルだけに`battery_percent < 90`を追加し、
+バッチの3件目に99.0を渡して発生させる。アプリのモデル検証を通過した後にDBで失敗するため、
+先に挿入した2件もロールバックされることと、未保存3件がバッファに残ることを確認できる。
+実運用のスキーマファイルは変更しない。
+
+現在のpytest設定ではパッケージ化していないテストファイルの同名衝突が起きるため、
+単体テストと統合テストのファイル名を分けている。
+これらの自動テストは実際のBrokerを起動しない。実通信は[MQTTの通し確認](mqtt.md)で行う。
+Broker切断・再接続とDBタイムアウトの自動検証は今後の課題。
+
+## 検査スクリプトの使い方
+
+```bash
+# src/testsを自動整形し、コード規約・型・テストを検査する。
+# env -u は、このコマンドからTMRP_TEST_DSNを除く。DBテストは10件skipする。
+env -u TMRP_TEST_DSN bash scripts/check_test.sh
+
+# ローカル学習用DBも使い、同じ品質検査と全テストを実行する。
+bash scripts/check_test.sh --db
+
+# 利用できるオプションを表示する。
+bash scripts/check_test.sh --help
+```
+
+`--db`はスクリプト内の固定接続先
+`host=/var/run/postgresql port=5432 dbname=tmrp_dev user=shou`を設定する。
+外側で`TMRP_TEST_DSN`を設定していても、`--db`では固定値を優先する。
+別のDBを使う場合は`--db`を付けずに環境変数を渡すか、上記のpytest直接実行を使う。
+オプションなしの実行は既存の環境変数を引き継ぐため、常にDBテストをskipする指定ではない。
+
+スクリプトのRuff対象はsrc/testsのみ。scriptsの検査は上記のRuffコマンドで別途行う。
