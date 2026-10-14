@@ -172,7 +172,7 @@ Broker切断・再接続とDBタイムアウトの自動検証は今後の課題
 ## 検査スクリプトの使い方
 
 ```bash
-# src/testsを自動整形し、コード規約・型・テストを検査する。
+# src/tests/scriptsを自動整形し、コード規約・型・テストを検査する。
 # env -u は、このコマンドからTMRP_TEST_DSNを除く。DBテストは10件skipする。
 env -u TMRP_TEST_DSN bash scripts/check_test.sh
 
@@ -189,4 +189,4 @@ bash scripts/check_test.sh --help
 別のDBを使う場合は`--db`を付けずに環境変数を渡すか、上記のpytest直接実行を使う。
 オプションなしの実行は既存の環境変数を引き継ぐため、常にDBテストをskipする指定ではない。
 
-スクリプトのRuff対象はsrc/testsのみ。scriptsの検査は上記のRuffコマンドで別途行う。
+スクリプトのRuff対象はsrc/tests/scripts。mypyの対象はsrc。

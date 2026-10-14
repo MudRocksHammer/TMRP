@@ -7,7 +7,7 @@ Run the following command from the TMRP directory:
 bash scripts/check_test.sh
 ```
 
-This script automatically fixes import ordering and formatting.
+This script automatically fixes import ordering and formatting in `src`, `tests`, and `scripts`.
 It then runs Ruff checks, strict mypy checks on `src`, and pytest.
 
 Expected results for Week 1:

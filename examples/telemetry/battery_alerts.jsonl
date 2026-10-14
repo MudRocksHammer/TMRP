@@ -1,0 +1,8 @@
+{"schema_version":"1.0","device_id":"robot-001","sequence_no":1,"event_time":"2024-06-01T12:00:00Z","message_type":"telemetry","battery_percent":30}
+{"schema_version":"1.0","device_id":"robot-002","sequence_no":1,"event_time":"2024-06-01T12:01:00Z","message_type":"telemetry","battery_percent":20}
+{"schema_version":"1.0","device_id":"robot-001","sequence_no":2,"event_time":"2024-06-01T12:02:00Z","message_type":"telemetry","battery_percent":20}
+{"schema_version":"1.0","device_id":"robot-001","sequence_no":3,"event_time":"2024-06-01T12:03:00Z","message_type":"telemetry","battery_percent":null}
+{"schema_version":"1.0","device_id":"robot-001","sequence_no":4,"event_time":"2024-06-01T12:04:00Z","message_type":"telemetry","battery_percent":24.9}
+{"schema_version":"1.0","device_id":"robot-002","sequence_no":2,"event_time":"2024-06-01T12:05:00Z","message_type":"telemetry","battery_percent":25}
+{"schema_version":"1.0","device_id":"robot-001","sequence_no":5,"event_time":"2024-06-01T12:06:00Z","message_type":"telemetry","battery_percent":25}
+{"schema_version":"1.0","device_id":"robot-001","sequence_no":6,"event_time":"2024-06-01T12:07:00Z","message_type":"telemetry","battery_percent":20}

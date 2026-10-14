@@ -37,17 +37,17 @@ cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
 echo "Running code quality checks, formatting checks, and tests..."
 # インポート順序を自動修正する
-$python -m ruff check --select I --fix src tests
+$python -m ruff check --select I --fix src tests scripts
 
 # 改行や空白などを整形する
-$python -m ruff format src tests
+$python -m ruff format src tests scripts
 
 # 整形後にコード規約を確認する
-$python -m ruff check src tests
+$python -m ruff check src tests scripts
 echo "Code quality checks passed."
 
 # 書式が整っていることを確認する
-$python -m ruff format --check src tests
+$python -m ruff format --check src tests scripts
 echo "Code formatting checks passed."
 
 # run static type checks

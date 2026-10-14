@@ -23,6 +23,7 @@
 - Local MQTT publisher and subscriber with topic and payload validation
 - PostgreSQL storage with duplicate skipping and transactional batch inserts
 - MQTT receive buffering and flushing on Ctrl+C
+- Per-device low-battery alerts with recovery events and reproducible CSV reports
 - Unit and database integration tests
 - Static type checking
 
@@ -30,7 +31,7 @@
 
 - Durable MQTT collection with recovery and retry handling
 - Extended telemetry analytics
-- Alarm processing
+- MQTT-connected alarms and persistent alert state
 - Telemetry replay
 - C++ device simulator
 - Docker compose
@@ -138,6 +139,9 @@ input validation, batch storage, and shutdown steps.
 See [PostgreSQL storage instructions](docs/storage.md) for database setup, schema,
 duplicate handling, transaction behavior, and database tests.
 
+See [battery alert instructions](docs/alerts.md) for thresholds, state transitions,
+CSV report reproduction, and automated tests.
+
 ## Development checks
 
 ```bash
@@ -164,6 +168,7 @@ See [verification instructions](docs/verification.md) for detailed checks.
 - MQTT topic and payload validation tests (without a broker)
 - Collector unit tests for buffering, validation failures, database errors, and shutdown
 - PostgreSQL integration tests for storage and collector batching, duplicates, and rollback
+- Battery state transitions, per-device alert events, and CSV report integration tests
 - Configuration validation and file-loading tests
 - JSON log formatting, level filtering, and repeated logging setup tests
 
