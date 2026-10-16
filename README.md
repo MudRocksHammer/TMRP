@@ -24,6 +24,7 @@
 - PostgreSQL storage with duplicate skipping and transactional batch inserts
 - MQTT receive buffering and flushing on Ctrl+C
 - Per-device low-battery alerts with recovery events and reproducible CSV reports
+- Asyncio telemetry pipeline prototype with bounded queues and simulated-wait benchmarks
 - Unit and database integration tests
 - Static type checking
 
@@ -142,6 +143,9 @@ duplicate handling, transaction behavior, and database tests.
 See [battery alert instructions](docs/alerts.md) for thresholds, state transitions,
 CSV report reproduction, and automated tests.
 
+See [asyncio pipeline instructions](docs/async-pipeline.md) for queue behavior,
+failure and cancellation tests, and the three-mode benchmark.
+
 ## Development checks
 
 ```bash
@@ -169,6 +173,7 @@ See [verification instructions](docs/verification.md) for detailed checks.
 - Collector unit tests for buffering, validation failures, database errors, and shutdown
 - PostgreSQL integration tests for storage and collector batching, duplicates, and rollback
 - Battery state transitions, per-device alert events, and CSV report integration tests
+- Asyncio queue backpressure, shutdown, consumer failure, and cancellation tests
 - Configuration validation and file-loading tests
 - JSON log formatting, level filtering, and repeated logging setup tests
 

@@ -39,8 +39,10 @@ async def run_pipeline(
     queue: asyncio.Queue[TelemetryMessage | None] = asyncio.Queue(maxsize=2)
 
     async with asyncio.TaskGroup() as tasks:
+        # 消费者启动
         consumer = tasks.create_task(consume(queue))
 
+        # 内层任务组，生产者将消息放入队列
         async with asyncio.TaskGroup() as producers:
             for messages in groups.values():
                 producers.create_task(produce(messages, queue, delay))
