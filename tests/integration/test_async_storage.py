@@ -1,33 +1,11 @@
 import asyncio
-import os
 from dataclasses import replace
-from pathlib import Path
 
 import psycopg
 import pytest
 
 from myproj.async_storage import insert_telemetry_async, insert_telemetry_batch_async
 from myproj.models import TelemetryMessage
-
-
-@pytest.fixture
-def sample_dsn() -> str:
-    dsn = os.environ.get("TMRP_TEST_DSN")
-    if not dsn:
-        pytest.skip("TMRP_TEST_DSN environment variable is not set")
-    return dsn
-
-
-@pytest.fixture
-def sample_schema() -> str:
-    project_root = Path(__file__).resolve().parents[2]
-    schema = (project_root / "sql/001_create_telemetry.sql").read_text(encoding="utf-8")
-    schema = schema.replace(
-        "CREATE TABLE telemetry_messages",
-        "CREATE TEMP TABLE telemetry_messages",
-        1,
-    )
-    return schema
 
 
 def test_async_storage_saves_and_skips_duplicates(

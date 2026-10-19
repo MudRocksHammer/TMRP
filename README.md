@@ -25,6 +25,7 @@
 - MQTT receive buffering and flushing on Ctrl+C
 - Per-device low-battery alerts with recovery events and reproducible CSV reports
 - Asyncio telemetry pipeline prototype with bounded queues and simulated-wait benchmarks
+- Async PostgreSQL batch storage with a bounded queue and task cancellation tests
 - Unit and database integration tests
 - Static type checking
 
@@ -144,7 +145,7 @@ See [battery alert instructions](docs/alerts.md) for thresholds, state transitio
 CSV report reproduction, and automated tests.
 
 See [asyncio pipeline instructions](docs/async-pipeline.md) for queue behavior,
-failure and cancellation tests, and the three-mode benchmark.
+async PostgreSQL batch storage, failure and cancellation tests, and the three-mode benchmark.
 
 ## Development checks
 

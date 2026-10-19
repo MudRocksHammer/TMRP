@@ -2,6 +2,7 @@
 
 Week 9の基礎演習として、固定JSONLから読み込んだTelemetryに受信待ちを模した遅延を加え、
 同期・非同期・Queue経由の3方式で同じアラートが得られることを確認する。
+さらに、QueueからPostgreSQLへ非同期で一括保存するパイプラインを実装している。
 
 実装は[src/myproj/async_pipeline.py](../src/myproj/async_pipeline.py)、
 比較スクリプトは[scripts/compare_async_telemetry.py](../scripts/compare_async_telemetry.py)。
@@ -119,7 +120,7 @@ pytest.raises後の内容確認はwithブロックの外、後始末の確認は
 .venv/bin/python -m pytest -q tests/units/test_async_pipeline.py
 
 # DB設定を除いて、整形・lint・型・既存テスト全体を検査する
-# DBを必要とする10件はskipする
+# TMRP_TEST_DSNが必要なDBテストはskipする
 env -u TMRP_TEST_DSN bash scripts/check_test.sh
 
 # srcに加え、比較スクリプトとQueueテストも型検査する
@@ -130,9 +131,88 @@ env -u TMRP_TEST_DSN bash scripts/check_test.sh
 比較スクリプトは2回実行し、CSVが毎回15行になり、表示した集計と一致することを確認した。
 計測値そのものを固定値で比較する自動テストは追加していない。
 
+## PostgreSQLへの非同期一括保存
+
+保存処理は[async_storage.py](../src/myproj/async_storage.py)、
+Queueと保存処理の接続は[async_collector.py](../src/myproj/async_collector.py)に実装する。
+アラート判定用のrun_pipelineとは別のパイプラインである。
+
+```text
+デバイス別produce → Queue(maxsize=2) → consume_to_db → PostgreSQL
+                                         ↓
+                               指定件数、またはNoneで保存
+```
+
+- `insert_telemetry_async(conn, message)`は新規挿入ならTrue、重複ならFalseを返す。
+- `insert_telemetry_batch_async(conn, messages)`は1バッチを1つのtransactionで保存し、
+  実際の挿入件数を返す。重複判定キーはdevice_id・event_time・sequence_no。
+- `consume_to_db(queue, conn, batch_size=3)`は指定件数ごとに保存し、Noneを受けた際に
+  残りを保存する。保存成功後にバッファを空にし、実際の挿入件数を合計して返す。
+- `run_db_pipeline(groups, conn, delay=0, batch_size=3)`は既存のproduceを使い、
+  外側のTaskGroupでconsumer、内側でデバイスごとのproducerを管理する。
+  全producer終了後にNoneを1回だけ送り、joinとタスク終了を待って挿入件数を返す。
+- batch_sizeが1未満ならValueError。DB接続の作成・終了は呼び出し側が担当し、
+  パイプライン内では1つのconsumerだけがその接続を使う。
+
+保存の成功はconsumerの正常終了と戻り値で確認する。
+`task_done()`は、項目を保存待ちリストに追加した段階でも呼ばれる。
+`queue.join()`だけではDBへの保存成功を保証しない。
+
+### トランザクションと異常終了
+
+検証ではautocommit=Trueの接続を使い、各バッチのtransactionを独立して確定する。
+正常3件の保存後、次の2件で制約違反が起きた場合、後ろの2件だけが取り消され、
+最初の3件は残る。パイプライン全体をまとめて取り消す仕組みではない。
+呼び出し側が外側のtransactionを用意した場合は、その確定・取り消しにも従う。
+
+DB consumerの失敗はTaskGroupからExceptionGroupとして伝わり、実行中のproducerも
+キャンセルされる。外部からのキャンセルでは両タスクの終了を待ち、CancelledErrorを伝える。
+キャンセル時のバッファ保存や再試行は行わず、未保存データの保持は保証しない。
+異常終了時にQueueへ未取得の項目が残る場合、別途joinだけを待っても完了しない。
+
+### 実DBテストの再現
+
+[DBの準備手順](storage.md)に従い、ローカルPostgreSQLへの接続を用意する。
+各DBテストは接続専用の一時テーブルとsearch_path=pg_tempを使い、通常の保存テーブルは変更しない。
+接続の生成・利用・終了は同じasyncio.run内で行う。
+
+```bash
+# DBを使わず、consumerとタスクの異常終了を検証する（7件）
+.venv/bin/python -m pytest -q tests/units/test_async_collector.py
+
+# 接続先を指定し、非同期保存とパイプラインを一時テーブルで検証する（10件）
+TMRP_TEST_DSN='host=/var/run/postgresql port=5432 dbname=tmrp_dev user=shou' \
+  .venv/bin/python -m pytest -q \
+  tests/integration/test_async_storage.py \
+  tests/integration/test_async_collector_integration.py
+
+# 自動整形・lint・本体の型検査・実DBを含む全テストを実行する
+bash scripts/check_test.sh --db
+```
+
+| テストファイル | ケース数 | 確認する内容 |
+|---|---:|---|
+| test_async_storage.py | 5 | 単件・一括保存、重複、空入力、バッチ全体のロールバック |
+| test_async_collector.py | 7 | 3件＋2件の分割、挿入数、空入力、不正な件数、例外、キャンセル |
+| test_async_collector_integration.py | 5 | consumerの保存と再投入、後続バッチの取り消し、複数producer、空入力2種類 |
+
+結合テストの固定JSONLは2台・8件。初回の挿入件数は8、同じ入力の再実行では0となり、
+DBの保存内容は変わらない。比較にはORDER BY device_id, sequence_noを指定し、
+期待値にも同じ順序を適用する。
+
+保存失敗の単体テストでは本物のconsumerと例外を出す保存モックを使う。
+外部キャンセルの単体テストではEventで両タスクの開始を確認し、
+本物のconsumerが空Queueで待機中にキャンセルされて終了することを確認する。
+実DB書き込み中のキャンセルは、このテストの検証範囲に含まない。
+
+2026-10-19の検証結果: DBありは全311件成功、DB設定なしは291件成功・20件skip。
+Ruff・40ファイルの書式検査・本体13ファイルのmypyも成功した。
+
 ## 次に接続する範囲
 
-現在は、メモリに読み込んだTelemetryを処理する基礎実装である。
-Queueの上限は待機中の項目数を制限するが、入力リストと出力イベントリストはメモリに保持する。
-MQTT購読、非同期DB保存、実通信での負荷測定、異常終了時の再試行・データ保持は今後の課題。
+現在は、メモリに読み込んだTelemetryをアラート判定または非同期DB保存へ渡す構成である。
+Queueの上限は待機中の項目数を制限するが、入力リストはメモリに保持する。
+アラート用パイプラインは出力イベントリストも保持する。
+DB consumerは件数到達またはNoneまで保存を待ち、時間によるflushは未実装。
+MQTT購読との非同期接続、実通信・実DBでの性能比較、異常終了時の再試行・データ保持は今後の課題。
 既存のMQTT Collectorは引き続き[従来の受信処理](mqtt.md)を使用する。
