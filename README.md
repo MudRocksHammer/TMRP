@@ -98,7 +98,7 @@ tmrp --version
 
 ```bash
 # 自動整形、コード規約、型、テストの検査を実行する
-bash scripts/check_test.sh
+bash scripts/dev/check_test.sh
 ```
 
 ## Usage
@@ -129,38 +129,44 @@ tmrp validate examples/telemetry/valid.json --config examples/config/valid.json
 
 `check-config` validates and displays settings. `validate --config` applies the
 configured log level. Omitting `--config` preserves the plain-text CLI behavior.
-See [configuration instructions](docs/configuration.md) for fields, defaults,
+See [configuration instructions](docs/reference/configuration.md) for fields, defaults,
 log format, expected output, and exit codes.
 
-See [telemetry analysis instructions](docs/analysis.md) for analysis setup,
+See [telemetry analysis instructions](docs/guides/analysis.md) for analysis setup,
 execution steps, plots, CSV reports, and expected results.
 
-See [MQTT instructions](docs/mqtt.md) for local broker setup, two-device publishing,
+See [MQTT instructions](docs/guides/mqtt.md) for local broker setup, two-device publishing,
 input validation, batch storage, and shutdown steps.
 
-See [PostgreSQL storage instructions](docs/storage.md) for database setup, schema,
+See [PostgreSQL storage instructions](docs/guides/storage.md) for database setup, schema,
 duplicate handling, transaction behavior, and database tests.
 
-See [battery alert instructions](docs/alerts.md) for thresholds, state transitions,
+See [battery alert instructions](docs/guides/alerts.md) for thresholds, state transitions,
 CSV report reproduction, and automated tests.
 
-See [asyncio pipeline instructions](docs/async-pipeline.md) for queue behavior,
+See [asyncio pipeline instructions](docs/guides/async-pipeline.md) for queue behavior,
 async PostgreSQL batch storage, failure and cancellation tests, and the three-mode benchmark.
+
+## Project layout
+
+Application code and tests are grouped by feature; scripts are grouped by purpose.
+See the [project structure](docs/development/project-structure.md) for file locations
+and the [documentation index](docs/README.md) for specifications and guides.
 
 ## Development checks
 
 ```bash
 # 書式を自動修正し、lint・型チェック・テストを実行する
-bash scripts/check_test.sh
+bash scripts/dev/check_test.sh
 
 # ローカルPostgreSQLを含めて同じ検査を実行する
-bash scripts/check_test.sh --db
+bash scripts/dev/check_test.sh --db
 ```
 
 Uses Ruff, mypy, and pytest. `--db` uses the local learning database. Without it,
 database tests run only when `TMRP_TEST_DSN` is set to a non-empty value; see
-[database test instructions](docs/storage.md#dbテストと品質チェック).
-See [verification instructions](docs/verification.md) for detailed checks.
+[database test instructions](docs/guides/storage.md#dbテストと品質チェック).
+See [verification instructions](docs/development/verification.md) for detailed checks.
 
 ## Testing Strategy
 

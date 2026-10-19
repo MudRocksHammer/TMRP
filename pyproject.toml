@@ -44,7 +44,7 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 
 [project.scripts]
-tmrp = "myproj.cli:main"
+tmrp = "myproj.app.cli:main"
 
 [tool.mypy]
 python_version = "3.12"

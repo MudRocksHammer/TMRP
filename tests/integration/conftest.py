@@ -7,7 +7,7 @@ import psycopg
 import pytest
 from psycopg import Connection
 
-from myproj.models import TelemetryMessage
+from myproj.telemetry.models import TelemetryMessage
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
