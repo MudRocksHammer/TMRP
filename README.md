@@ -25,7 +25,7 @@
 - MQTT receive buffering and flushing on Ctrl+C
 - Per-device low-battery alerts with recovery events and reproducible CSV reports
 - Asyncio telemetry pipeline prototype with bounded queues and simulated-wait benchmarks
-- Async PostgreSQL batch storage with a bounded queue and task cancellation tests
+- Async PostgreSQL storage with count- and time-based batch flushing and task cancellation tests
 - Unit and database integration tests
 - Static type checking
 

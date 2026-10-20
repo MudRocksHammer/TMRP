@@ -1,6 +1,8 @@
 import asyncio
+from collections.abc import Iterable
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import psycopg
 import pytest
@@ -264,5 +266,130 @@ def test_run_db_pipeline_with_empty_groups(
                 expected = []
 
                 assert rows == expected
+
+    asyncio.run(scenario())
+
+
+def test_timed_flush_saves_twice_before_sentinel(
+    sample_dsn: str,
+    sample_schema: str,
+    sample_message: TelemetryMessage,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    second = replace(sample_message, sequence_no=sample_message.sequence_no + 1)
+
+    async def scenario() -> None:
+        saved = asyncio.Event()
+        saved_batches: list[list[TelemetryMessage]] = []
+        original_insert = collector.insert_telemetry_batch_async
+
+        async def observed_insert(
+            conn: psycopg.AsyncConnection[tuple[Any, ...]],
+            messages: Iterable[TelemetryMessage],
+        ) -> int:
+            batch = list(messages)
+            inserted = await original_insert(conn, batch)
+            saved_batches.append(batch)
+            # 本物の保存関数がtransactionを抜けた後に通知する。
+            saved.set()
+            return inserted
+
+        monkeypatch.setattr(collector, "insert_telemetry_batch_async", observed_insert)
+
+        async with await psycopg.AsyncConnection.connect(
+            sample_dsn,
+            autocommit=True,
+            options="-c timezone=UTC -c search_path=pg_temp",
+        ) as conn:
+            await conn.execute(sample_schema)
+            queue: asyncio.Queue[TelemetryMessage | None] = asyncio.Queue()
+            task = asyncio.create_task(
+                collector.consume_to_db(queue, conn, batch_size=3, flush_interval=0.01)
+            )
+            try:
+                expected_messages: list[TelemetryMessage] = []
+                for message in (sample_message, second):
+                    # 前回の通知を消してから、次の1件を投入する。
+                    saved.clear()
+                    await queue.put(message)
+                    await asyncio.wait_for(saved.wait(), timeout=5)
+                    assert not task.done()
+                    expected_messages.append(message)
+
+                    # Noneを送る前に、保存済みの全項目を実DBから確認する。
+                    async with conn.cursor() as cur:
+                        await cur.execute(
+                            "SELECT device_id, sequence_no, event_time, "
+                            "battery_percent, payload FROM telemetry_messages "
+                            "ORDER BY sequence_no"
+                        )
+                        rows = await cur.fetchall()
+                    assert rows == [
+                        (
+                            item.device_id,
+                            item.sequence_no,
+                            item.event_time,
+                            item.battery_percent,
+                            item.to_dict(),
+                        )
+                        for item in expected_messages
+                    ]
+
+                await queue.put(None)
+                assert await asyncio.wait_for(task, timeout=5) == 2
+                await asyncio.wait_for(queue.join(), timeout=1)
+                assert saved_batches == [[sample_message], [second]]
+            finally:
+                # assertが失敗しても、接続を閉じる前にconsumerを回収する。
+                if not task.done():
+                    task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+def test_timed_flush_rolls_back_failed_batch(
+    sample_dsn: str,
+    sample_schema: str,
+    sample_message: TelemetryMessage,
+) -> None:
+    bad_message = replace(
+        sample_message,
+        sequence_no=sample_message.sequence_no + 1,
+        battery_percent=95,
+    )
+
+    async def scenario() -> None:
+        async with await psycopg.AsyncConnection.connect(
+            sample_dsn,
+            autocommit=True,
+            options="-c timezone=UTC -c search_path=pg_temp",
+        ) as conn:
+            await conn.execute(sample_schema)
+            await conn.execute(
+                """
+                ALTER TABLE pg_temp.telemetry_messages
+                ADD CONSTRAINT test_timed_flush_battery_limit
+                CHECK (battery_percent < 90)
+                """
+            )
+            queue: asyncio.Queue[TelemetryMessage | None] = asyncio.Queue()
+            queue.put_nowait(sample_message)
+            queue.put_nowait(bad_message)
+
+            # 2件は件数条件に届かず、Noneも送らないため時間で保存される。
+            with pytest.raises(psycopg.errors.CheckViolation):
+                await asyncio.wait_for(
+                    collector.consume_to_db(
+                        queue, conn, batch_size=3, flush_interval=0.05
+                    ),
+                    timeout=5,
+                )
+
+            # 正常な1件目も取り消されたことを、例外の捕捉後に確認する。
+            async with conn.cursor() as cur:
+                await cur.execute("SELECT COUNT(*) FROM telemetry_messages")
+                assert await cur.fetchone() == (0,)
+            await asyncio.wait_for(queue.join(), timeout=1)
 
     asyncio.run(scenario())

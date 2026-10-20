@@ -140,23 +140,55 @@ Queueと保存処理の接続は[async_collector.py](../../src/myproj/collection
 ```text
 デバイス別produce → Queue(maxsize=2) → consume_to_db → PostgreSQL
                                          ↓
-                               指定件数、またはNoneで保存
+                               指定件数・保存期限・Noneで保存
 ```
 
 - `insert_telemetry_async(conn, message)`は新規挿入ならTrue、重複ならFalseを返す。
 - `insert_telemetry_batch_async(conn, messages)`は1バッチを1つのtransactionで保存し、
   実際の挿入件数を返す。重複判定キーはdevice_id・event_time・sequence_no。
-- `consume_to_db(queue, conn, batch_size=3)`は指定件数ごとに保存し、Noneを受けた際に
-  残りを保存する。保存成功後にバッファを空にし、実際の挿入件数を合計して返す。
-- `run_db_pipeline(groups, conn, delay=0, batch_size=3)`は既存のproduceを使い、
+- `consume_to_db(queue, conn, batch_size=3, flush_interval=1.0)`は件数到達・期限到達・
+  Noneの受信で保存する。保存成功後にバッファを空にし、実際の挿入件数を合計して返す。
+- `run_db_pipeline(groups, conn, delay=0, batch_size=3, flush_interval=1.0)`は既存のproduceを使い、
   外側のTaskGroupでconsumer、内側でデバイスごとのproducerを管理する。
   全producer終了後にNoneを1回だけ送り、joinとタスク終了を待って挿入件数を返す。
-- batch_sizeが1未満ならValueError。DB接続の作成・終了は呼び出し側が担当し、
-  パイプライン内では1つのconsumerだけがその接続を使う。
+- batch_sizeが1未満、またはflush_intervalが正の有限値でなければValueError。
+  consumerとpipelineの両方で検証し、pipelineではTaskGroup開始前に例外を返す。
+  DB接続の作成・終了は呼び出し側が担当し、1つのconsumerだけがその接続を使う。
 
 保存の成功はconsumerの正常終了と戻り値で確認する。
 `task_done()`は、項目を保存待ちリストに追加した段階でも呼ばれる。
 `queue.join()`だけではDBへの保存成功を保証しない。
+
+### 時間による保存
+
+flush_intervalの単位は秒、既定値は1.0。
+consumerが最初の1件を保存待ちリストへ追加した時点で、
+`loop.time() + flush_interval`を期限にする。後続メッセージの受信では期限を延長しない。
+Telemetryのevent_timeではなく、イベントループの単調増加する時計を使う。
+
+| 経過時間 | 例: batch_size=3、flush_interval=1.0 |
+|---|---|
+| 0.0秒 | 1件目を保持し、期限を1.0秒に設定 |
+| 0.6秒 | 2件目を保持。期限は変更しない |
+| 1.0秒以降 | 次の受信待ちが期限に達し、保持している2件を保存 |
+
+保存待ちがある間は、期限までの残り時間を指定してqueue.getをwait_forで待つ。
+待機がタイムアウトしたら保存し、バッファと期限をリセットして受信を続ける。
+時間切れは終了通知ではない。空の間は通常のqueue.getで待ち、空バッチは保存しない。
+件数到達時にも期限をリセットし、次の保存待ちの1件目から新しい期限を設定する。
+
+flush_intervalは保存を開始する目安であり、DB処理やイベントループの混雑も含めた
+保存完了時間の上限ではない。たとえば0.1秒にする場合は、呼び出し側で指定する。
+
+```python
+inserted = await run_db_pipeline(
+    groups, conn, batch_size=3, flush_interval=0.1
+)
+```
+
+TimeoutErrorを捕捉するのはQueueの待機だけ。
+DB保存自体がTimeoutErrorを出した場合は、そのまま呼び出し側へ伝える。
+待機がタイムアウトした際は項目を取り出していないのでtask_doneを呼ばない。
 
 ### トランザクションと異常終了
 
@@ -177,10 +209,10 @@ DB consumerの失敗はTaskGroupからExceptionGroupとして伝わり、実行�
 接続の生成・利用・終了は同じasyncio.run内で行う。
 
 ```bash
-# DBを使わず、consumerとタスクの異常終了を検証する（7件）
+# DBを使わず、consumerの件数・時間保存とタスクの異常終了を検証する（22件）
 .venv/bin/python -m pytest -q tests/units/collection/test_async_collector.py
 
-# 接続先を指定し、非同期保存とパイプラインを一時テーブルで検証する（10件）
+# 接続先を指定し、非同期保存とパイプラインを一時テーブルで検証する（12件）
 TMRP_TEST_DSN='host=/var/run/postgresql port=5432 dbname=tmrp_dev user=shou' \
   .venv/bin/python -m pytest -q \
   tests/integration/persistence/test_async_storage.py \
@@ -193,8 +225,8 @@ bash scripts/dev/check_test.sh --db
 | テストファイル | ケース数 | 確認する内容 |
 |---|---:|---|
 | test_async_storage.py | 5 | 単件・一括保存、重複、空入力、バッチ全体のロールバック |
-| test_async_collector.py | 7 | 3件＋2件の分割、挿入数、空入力、不正な件数、例外、キャンセル |
-| test_async_collector_integration.py | 5 | consumerの保存と再投入、後続バッチの取り消し、複数producer、空入力2種類 |
+| test_async_collector.py | 22 | 件数・時間保存、空入力、間隔の検証、期限の維持、例外、キャンセル |
+| test_async_collector_integration.py | 7 | 保存と再投入、ロールバック、複数producer、空入力、終了通知前の時間保存 |
 
 結合テストの固定JSONLは2台・8件。初回の挿入件数は8、同じ入力の再実行では0となり、
 DBの保存内容は変わらない。比較にはORDER BY device_id, sequence_noを指定し、
@@ -205,14 +237,24 @@ DBの保存内容は変わらない。比較にはORDER BY device_id, sequence_n
 本物のconsumerが空Queueで待機中にキャンセルされて終了することを確認する。
 実DB書き込み中のキャンセルは、このテストの検証範囲に含まない。
 
-2026-10-19の検証結果: DBありは全311件成功、DB設定なしは291件成功・20件skip。
-配置整理後も全テストが成功し、Ruff・46ファイルの書式検査・本体19ファイルのmypyも成功した。
+時間保存の単体テストでは、実時計を変更せずconsumerが参照する時計を差し替えて、
+後続受信で期限が延びないことを検証する。保存由来のTimeoutErrorは例外の同一性も確認し、
+テスト自体の待機上限によるタイムアウトと区別する。
+
+実DBでは、保存関数がtransactionを抜けた後のEvent通知を待ち、Noneを送る前に
+1件ずつ2回の保存と全項目を確認する。別のケースでは件数未達の2件を時間保存し、
+後ろの1件の制約違反によって正常な1件目も取り消され、0行になることを確認する。
+これらは一時テーブルを使い、テスト側の手動rollbackには依存しない。
+
+2026-10-20の検証結果: DBありは全328件成功、DB設定なしは306件成功・22件skip。
+Ruff・46ファイルの書式検査・本体19ファイルのmypyも成功した。
 
 ## 次に接続する範囲
 
 現在は、メモリに読み込んだTelemetryをアラート判定または非同期DB保存へ渡す構成である。
 Queueの上限は待機中の項目数を制限するが、入力リストはメモリに保持する。
 アラート用パイプラインは出力イベントリストも保持する。
-DB consumerは件数到達またはNoneまで保存を待ち、時間によるflushは未実装。
+非同期DB consumerは件数・時間・Noneで保存する。既存の同期MQTT Collectorには
+今回のflush_intervalは適用されない。
 MQTT購読との非同期接続、実通信・実DBでの性能比較、異常終了時の再試行・データ保持は今後の課題。
 既存のMQTT Collectorは引き続き[従来の受信処理](mqtt.md)を使用する。
