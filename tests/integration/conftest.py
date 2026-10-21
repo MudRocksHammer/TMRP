@@ -7,8 +7,6 @@ import psycopg
 import pytest
 from psycopg import Connection
 
-from myproj.telemetry.models import TelemetryMessage
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -31,12 +29,6 @@ def db_conn() -> Iterator[Connection[tuple[Any, ...]]]:
     ) as conn:
         conn.execute(schema)
         yield conn
-
-
-@pytest.fixture
-def sample_message() -> TelemetryMessage:
-    text = (PROJECT_ROOT / "examples/telemetry/valid.json").read_text(encoding="utf-8")
-    return TelemetryMessage.from_json(text)
 
 
 @pytest.fixture
