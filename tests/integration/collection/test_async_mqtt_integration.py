@@ -1,7 +1,6 @@
 import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import replace
-from unittest import result
 
 import psycopg
 from aiomqtt import Message

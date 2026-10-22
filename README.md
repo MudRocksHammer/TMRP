@@ -26,6 +26,7 @@
 - Per-device low-battery alerts with recovery events and reproducible CSV reports
 - Asyncio telemetry pipeline prototype with bounded queues and simulated-wait benchmarks
 - Async PostgreSQL storage with count- and time-based batch flushing and task cancellation tests
+- Async MQTT collection with a receive limit, validation, and PostgreSQL batch storage
 - Unit and database integration tests
 - Static type checking
 
@@ -138,6 +139,9 @@ execution steps, plots, CSV reports, and expected results.
 See [MQTT instructions](docs/guides/mqtt.md) for local broker setup, two-device publishing,
 input validation, batch storage, and shutdown steps.
 
+See [async MQTT instructions](docs/guides/async-mqtt.md) for receiving 10 messages,
+storing them through the async pipeline, and automatic shutdown.
+
 See [PostgreSQL storage instructions](docs/guides/storage.md) for database setup, schema,
 duplicate handling, transaction behavior, and database tests.
 
@@ -181,6 +185,7 @@ See [verification instructions](docs/development/verification.md) for detailed c
 - PostgreSQL integration tests for storage and collector batching, duplicates, and rollback
 - Battery state transitions, per-device alert events, and CSV report integration tests
 - Asyncio queue backpressure, shutdown, consumer failure, and cancellation tests
+- Async MQTT receive limits, producer and DB pipeline tests, and database integration
 - Configuration validation and file-loading tests
 - JSON log formatting, level filtering, and repeated logging setup tests
 

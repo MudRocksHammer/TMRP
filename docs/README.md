@@ -14,6 +14,7 @@
 
 - [データ分析・可視化](guides/analysis.md)
 - [MQTTの送受信](guides/mqtt.md)
+- [非同期MQTT購読とDB保存](guides/async-mqtt.md)
 - [PostgreSQLへの保存](guides/storage.md)
 - [低バッテリーアラート](guides/alerts.md)
 - [非同期パイプライン・DB保存・比較実験](guides/async-pipeline.md)

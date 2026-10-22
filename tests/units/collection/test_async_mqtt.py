@@ -11,7 +11,11 @@ from psycopg import AsyncConnection
 
 import myproj.collection.async_collector as collector
 import myproj.collection.async_mqtt as mqtt_pipeline
-from myproj.collection.async_mqtt import produce_mqtt, run_mqtt_db_pipeline
+from myproj.collection.async_mqtt import (
+    produce_mqtt,
+    run_mqtt_db_pipeline,
+    take_messages,
+)
 from myproj.telemetry.models import TelemetryMessage
 
 
@@ -29,6 +33,62 @@ def mqtt_message(topic: str, payload: bytes) -> Message:
 async def fake_messages(inputs: list[Message]) -> AsyncIterator[Message]:
     for message in inputs:
         yield message
+
+
+def test_take_messages_does_not_request_beyond_limit() -> None:
+    # 件数制限は本文の検証をせず、受け取ったMessageをそのまま渡す。
+    inputs = [
+        mqtt_message("tmrp/devices/robot-001/telemetry", b"first"),
+        mqtt_message("tmrp/devices/robot-002/telemetry", b"second"),
+    ]
+
+    async def guarded_messages() -> AsyncIterator[Message]:
+        yield inputs[0]
+        yield inputs[1]
+        raise AssertionError("上限を超えて次の入力を取得しました")
+
+    async def collect() -> list[Message]:
+        return [message async for message in take_messages(guarded_messages(), limit=2)]
+
+    async def scenario() -> None:
+        result = await asyncio.wait_for(collect(), timeout=1)
+        assert result == inputs
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("input_count", [1, 0], ids=["short_input", "empty_input"])
+def test_take_messages_input_ends_before_limit(input_count: int) -> None:
+    inputs = [
+        mqtt_message("tmrp/devices/robot-001/telemetry", b"first")
+        for _ in range(input_count)
+    ]
+
+    async def collect() -> list[Message]:
+        return [
+            message async for message in take_messages(fake_messages(inputs), limit=3)
+        ]
+
+    async def scenario() -> None:
+        result = await asyncio.wait_for(collect(), timeout=1)
+        assert result == inputs
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("limit", [0, -1])
+def test_take_messages_rejects_invalid_limit(limit: int) -> None:
+    async def collect() -> list[Message]:
+        return [
+            message async for message in take_messages(fake_messages([]), limit=limit)
+        ]
+
+    async def scenario() -> None:
+        # ジェネレーターを作るだけではなく、反復して本体の検証を実行する。
+        with pytest.raises(ValueError, match="Limit must be greater than 0"):
+            await asyncio.wait_for(collect(), timeout=1)
+
+    asyncio.run(scenario())
 
 
 def test_produce_mqtt_normal_input(sample_message: TelemetryMessage) -> None:

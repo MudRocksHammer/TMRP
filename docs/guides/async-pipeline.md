@@ -249,12 +249,37 @@ DBの保存内容は変わらない。比較にはORDER BY device_id, sequence_n
 2026-10-20の検証結果: DBありは全328件成功、DB設定なしは306件成功・22件skip。
 Ruff・46ファイルの書式検査・本体19ファイルのmypyも成功した。
 
-## 次に接続する範囲
+## MQTT購読との接続
 
-現在は、メモリに読み込んだTelemetryをアラート判定または非同期DB保存へ渡す構成である。
-Queueの上限は待機中の項目数を制限するが、入力リストはメモリに保持する。
-アラート用パイプラインは出力イベントリストも保持する。
-非同期DB consumerは件数・時間・Noneで保存する。既存の同期MQTT Collectorには
-今回のflush_intervalは適用されない。
-MQTT購読との非同期接続、実通信・実DBでの性能比較、異常終了時の再試行・データ保持は今後の課題。
-既存のMQTT Collectorは引き続き[従来の受信処理](mqtt.md)を使用する。
+[async_mqtt.py](../../src/myproj/collection/async_mqtt.py)に、MQTT入力を既存のDB consumerへ渡す処理を実装している。
+
+```text
+client.messages → take_messages(limit=10) → produce_mqtt
+                                            ↓
+                                      Queue(maxsize=2)
+                                            ↓
+                                      consume_to_db → PostgreSQL
+```
+
+- `take_messages`は指定件数を渡した直後に終了し、次のメッセージを取得しない。
+  件数は検証前の受信件数で、不正入力と再配信も含む。
+- `produce_mqtt`は既存の検証関数を使い、正常データだけをQueueへ渡す。
+  不正UTF-8とTelemetry検証エラーはWARNINGに記録して継続する。戻り値はQueueへの投入件数。
+- `run_mqtt_db_pipeline`はproducerとconsumerをTaskGroupで管理する。
+  producerの正常終了後にNoneを1回送り、joinとconsumerの終了を待ち、実挿入件数を返す。
+  DB接続の作成・終了とMQTT購読は呼び出し側が担当する。
+- DB保存失敗時は受信側もキャンセルされる。外部キャンセル時も両タスクの終了を待つ。
+  正常終了時の端数保存と、キャンセルによる終了は異なる。キャンセル時の未保存データの保存保証はない。
+
+起動順、期待される表示、同期版との違いは[非同期MQTT購読とDB保存](async-mqtt.md)を参照する。
+MQTT単体テスト21件は入力検証・管理関数・例外・外部キャンセル・件数制限を検証する。
+MQTTの実DB結合テスト1件は、不正JSONを含む入力から正常5件を保存し、再投入時0件と全行不変を確認する。
+いずれも自動テスト中にMQTT Brokerへは接続しない。
+
+## 残っている課題
+
+模擬入力の比較実験は実MQTT・実DBでの性能評価ではない。
+実通信・実DBの性能比較と、異常終了時の再試行・データ保持は今後の課題。
+Queueの上限はそのQueueの待機項目数を制限するもので、MQTTクライアントを含む全体のメモリ上限ではない。
+固定入力のパイプラインは入力リスト、アラート用は出力イベントリストもメモリに保持する。
+既存の[同期MQTT Collector](mqtt.md)にはflush_intervalは適用されない。

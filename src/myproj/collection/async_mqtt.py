@@ -1,8 +1,9 @@
 import asyncio
 import math
-from collections.abc import AsyncIterable
+from collections.abc import AsyncIterable, AsyncIterator
 from typing import Any
 
+import aiomqtt
 from aiomqtt import Message
 from loguru import logger
 from psycopg import AsyncConnection
@@ -27,6 +28,21 @@ async def produce_mqtt(
         await queue.put(msg)
         res_count += 1
     return res_count
+
+
+async def take_messages(
+    messages: AsyncIterator[aiomqtt.Message],
+    limit: int,
+) -> AsyncIterator[aiomqtt.Message]:
+    if limit <= 0:
+        raise ValueError("Limit must be greater than 0")
+
+    count = 0
+    async for message in messages:
+        yield message
+        count += 1
+        if count >= limit:
+            return
 
 
 async def run_mqtt_db_pipeline(

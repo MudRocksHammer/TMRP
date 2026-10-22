@@ -1,5 +1,8 @@
 # MQTT送受信の再現手順
 
+この文書は同期版`subscribe_telemetry.py`の手順を説明する。
+10件受信で自動終了する非同期版は[非同期MQTT購読とDB保存](async-mqtt.md)を参照する。
+
 ローカルのMosquitto Brokerを介し、Pythonシミュレーターから2台分のTelemetryを送信する。
 Python受信側はトピックとJSON本文を検証し、正常データを3件ずつPostgreSQLへ保存する。
 不正データは理由を表示して拒否し、次の受信を続ける。Ctrl+Cで終了すると残件も保存する。
@@ -29,7 +32,7 @@ sudo apt install mosquitto mosquitto-clients
 .venv/bin/python -m pip install -e ".[dev]"
 ```
 
-`paho-mqtt`と`psycopg[binary]`は本体の依存関係に含まれる。analysis追加依存関係は不要。
+`paho-mqtt`・非同期版用の`aiomqtt`・`psycopg[binary]`は本体の依存関係に含まれる。analysis追加依存関係は不要。
 subscriberは起動時にDBへ接続するため、PostgreSQLも起動しておく。
 DB接続先はソケット`/var/run/postgresql`、ポート5432、DB`tmrp_dev`、ロール`shou`。
 MQTT接続先は送受信スクリプト内で`127.0.0.1:18883`に固定している。
@@ -215,12 +218,12 @@ TMRP_TEST_DSN='host=/var/run/postgresql port=5432 dbname=tmrp_dev user=shou' \
   .venv/bin/python -m pytest -q
 ```
 
-`TMRP_TEST_DSN`未設定ではDBテスト10件はskipする。DBテストは一時テーブルを使う。
+`TMRP_TEST_DSN`未設定ではDB接続が必要なテストはskipする。DBテストは一時テーブルを使う。
 collectorの単体テストは保存処理とクライアントをMockにし、DB統合テストは一時テーブルを使用する。
 どちらもBrokerとの実通信を検証しない。送受信の確認には上記の3端末による手順も実行する。
 `bash scripts/dev/check_test.sh --db`でもローカルDBを含む検査を実行できる。
 接続先の指定方法は[保存手順](storage.md#検査スクリプトの使い方)を参照する。
-スクリプトのRuff対象はsrcとtestsのみなので、送受信スクリプトは上記コマンドで検査する。
+検査スクリプトのRuff対象にはsrc・tests・scriptsが含まれる。
 
 ## 終了方法と現在の制約
 
