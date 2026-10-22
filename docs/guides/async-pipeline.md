@@ -276,10 +276,79 @@ MQTT単体テスト21件は入力検証・管理関数・例外・外部キャ�
 MQTTの実DB結合テスト1件は、不正JSONを含む入力から正常5件を保存し、再投入時0件と全行不変を確認する。
 いずれも自動テスト中にMQTT Brokerへは接続しない。
 
+## 実DBの同期・非同期保存を比較する
+
+[compare_db_storage.py](../../scripts/processing/compare_db_storage.py)は、同期・非同期それぞれの
+逐次INSERTと複数行INSERTを、同じ入力・バッチサイズで測定する。MQTT受信やQueue処理は計測に含まない。
+[DB準備](storage.md)の接続先を使用し、測定ごとに新しい接続と一時テーブルを作る。
+通常のtelemetry_messagesテーブルは変更しない。
+
+```bash
+# Excel出力を含む分析用ライブラリを導入する（初回または依存関係の更新時）
+.venv/bin/python -m pip install -e '.[analysis]'
+
+# 4方式を各5回測定し、保存内容を確認してCSVとExcelを上書きする
+.venv/bin/python scripts/processing/compare_db_storage.py
+
+# 全20回の測定条件と経過時間を確認する
+cat reports/db_storage_benchmark.csv
+```
+
+| 条件 | 内容 |
+|---|---|
+| 入力 | valid.jsonから生成した10000件、100デバイス各100件、連番0〜9999 |
+| バッチ | 100件ずつ100バッチ。各バッチが独立したtransaction |
+| 接続 | 各測定で1接続、autocommit=True、UTC、search_path=pg_temp |
+| 順序 | sync→sync_multi→async→async_multiを5回繰り返す。バッチは全方式とも逐次処理 |
+| 計測対象 | perf_counterによる100バッチの保存時間。各transaction終了を含む |
+| 計測対象外 | 入力・バッチ準備、接続、DDL、SELECT、内容照合、接続終了、イベントループ作成・終了、CSV・Excel出力 |
+
+各回の実挿入件数10000を確認し、計測後に全行のdevice_id・sequence_no・event_time・
+battery_percent・payloadを入力と比較する。全20回の検証が成功した後、
+[CSV](../../reports/db_storage_benchmark.csv)へヘッダーとデータ20行を上書きし、
+[Excel](../../reports/db_storage_benchmark.xlsx)へ同じ測定結果を方式別に保存する。
+
+```csv
+mode,run,message_count,batch_size,inserted_count,elapsed_seconds
+```
+
+Excelは次の4シートで構成される。各シートにはCSVと同じ6列と、その方式の測定5回分が入る。
+件数・run番号・秒数は文字列ではなく数値として保存する。見出し行を固定し、フィルターを付け、
+秒数を小数点以下6桁で表示する。表示桁数による保存値の丸めは行わない。
+
+| シート | 保存方式 | 100件のバッチあたりのINSERT回数 |
+|---|---|---:|
+| sync | 同期・逐次INSERT | 100 |
+| sync_multi | 同期・複数行INSERT | 1 |
+| async | 非同期・逐次INSERT | 100 |
+| async_multi | 非同期・複数行INSERT | 1 |
+
+Excel出力は[openpyxl](https://openpyxl.readthedocs.io/en/stable/tutorial.html)を使用する。
+実行ごとにブック全体を上書きするため、結果を残す場合は別名で保存する。
+
+2026-10-22の保存済み測定結果（秒）:
+
+| mode | 最小値 | 中央値 |
+|---|---:|---:|
+| sync | 6.216036 | 6.968549 |
+| sync_multi | 0.668601 | 0.786892 |
+| async | 7.203577 | 7.736999 |
+| async_multi | 0.789723 | 0.819873 |
+
+この条件で複数行INSERTは、それぞれの逐次版に対して中央値で約8.86倍・9.44倍速かった。
+同じ1接続のままINSERTの実行回数を減らした比較であり、複数接続による並列処理ではない。
+
+この測定では非同期版も1接続で順番に保存し、他の仕事とI/O待ちを重ねていない。
+非同期版の高速化は完了条件にしない。測定順は固定で、専用のウォームアップは行っておらず、
+DBキャッシュや他プロセスの負荷によって数値は変わる。
+一時テーブルは通常テーブルと書き込み特性が異なるため、本番の永続保存性能や
+MQTTからDBまでの処理能力を表す結果ではない。性能の優劣を固定したテストは追加しない。
+
 ## 残っている課題
 
 模擬入力の比較実験は実MQTT・実DBでの性能評価ではない。
-実通信・実DBの性能比較と、異常終了時の再試行・データ保持は今後の課題。
+実DBの保存部分は上記の条件で測定済み。実MQTTから通常テーブルへの保存までの性能比較と、
+異常終了時の再試行・データ保持は今後の課題。
 Queueの上限はそのQueueの待機項目数を制限するもので、MQTTクライアントを含む全体のメモリ上限ではない。
 固定入力のパイプラインは入力リスト、アラート用は出力イベントリストもメモリに保持する。
 既存の[同期MQTT Collector](mqtt.md)にはflush_intervalは適用されない。

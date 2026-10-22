@@ -81,7 +81,7 @@ bash scripts/dev/check_test.sh --db
 | analysis | analyze_sample_telemetry.py、report_battery_alerts.py: 分析・CSV出力 |
 | mqtt | publish_telemetry.py、subscribe_telemetry.py、subscribe_telemetry_async.py: MQTT送受信 |
 | persistence | store_sample_telemetry.py: DB保存の実行例 |
-| processing | compare_async_telemetry.py: 同期・非同期・Queueの比較 |
+| processing | compare_async_telemetry.py: 模擬受信待ちの比較、compare_db_storage.py: DB保存4方式の比較・CSV／Excel出力 |
 
 例: `bash scripts/dev/check_test.sh`、
 `.venv/bin/python scripts/analysis/report_battery_alerts.py`。

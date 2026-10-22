@@ -7,6 +7,7 @@ import pytest
 from myproj.persistence.async_storage import (
     insert_telemetry_async,
     insert_telemetry_batch_async,
+    insert_telemetry_batch_async_multi,
 )
 from myproj.telemetry.models import TelemetryMessage
 
@@ -212,5 +213,162 @@ def test_async_storage_batch_failed_inserts(
                 row = await cur.fetchall()
                 assert row is not None
                 assert len(row) == 0
+
+    asyncio.run(scenario())
+
+
+def test_insert_telemetry_batch_async_multi(
+    sample_dsn: str,
+    sample_schema: str,
+    sample_message: TelemetryMessage,
+) -> None:
+    async def scenario() -> None:
+        async with await psycopg.AsyncConnection.connect(
+            sample_dsn,
+            autocommit=True,
+            options="-c timezone=UTC -c search_path=pg_temp",
+        ) as conn:
+            await conn.execute(sample_schema)
+
+            second_message = replace(
+                sample_message,
+                sequence_no=sample_message.sequence_no + 1,
+            )
+            messages = [sample_message, second_message]
+            inserted_count = await insert_telemetry_batch_async_multi(conn, messages)
+            assert inserted_count == 2
+
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT device_id, sequence_no, event_time, "
+                    "battery_percent, payload "
+                    "FROM telemetry_messages ORDER BY sequence_no"
+                )
+                row = await cur.fetchall()
+                assert row is not None
+                assert len(row) == 2
+                assert row[0][1] == sample_message.sequence_no
+                assert row[1][1] == sample_message.sequence_no + 1
+                assert row[0][0] == sample_message.device_id
+                assert row[1][0] == second_message.device_id
+                assert row[0][2] == sample_message.event_time
+                assert row[1][2] == second_message.event_time
+                assert row[0][3] == sample_message.battery_percent
+                assert row[1][3] == second_message.battery_percent
+                assert row[0][4] == sample_message.to_dict()
+                assert row[1][4] == second_message.to_dict()
+
+    asyncio.run(scenario())
+
+
+def test_insert_telemetry_batch_async_multi_skips_duplicates(
+    sample_dsn: str,
+    sample_schema: str,
+    sample_message: TelemetryMessage,
+) -> None:
+    async def scenario() -> None:
+        async with await psycopg.AsyncConnection.connect(
+            sample_dsn,
+            autocommit=True,
+            options="-c timezone=UTC -c search_path=pg_temp",
+        ) as conn:
+            await conn.execute(sample_schema)
+
+            second_message = replace(
+                sample_message,
+                sequence_no=sample_message.sequence_no + 1,
+            )
+            inserted_count = await insert_telemetry_batch_async_multi(
+                conn, [sample_message, second_message, sample_message]
+            )
+            assert inserted_count == 2
+
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT device_id, sequence_no, event_time, "
+                    "battery_percent, payload "
+                    "FROM telemetry_messages ORDER BY sequence_no"
+                )
+                row = await cur.fetchall()
+                assert row is not None
+                assert len(row) == 2
+                assert row[0][1] == sample_message.sequence_no
+                assert row[1][1] == sample_message.sequence_no + 1
+
+            inserted_count = await insert_telemetry_batch_async_multi(
+                conn, [sample_message, second_message, sample_message]
+            )
+            assert inserted_count == 0
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT device_id, sequence_no, event_time, "
+                    "battery_percent, payload "
+                    "FROM telemetry_messages ORDER BY sequence_no"
+                )
+                row_after = await cur.fetchall()
+                assert row_after is not None
+                assert len(row_after) == 2
+                assert row_after == row
+
+    asyncio.run(scenario())
+
+
+def test_insert_telemetry_batch_async_multi_empty_list(
+    sample_dsn: str,
+    sample_schema: str,
+) -> None:
+    async def scenario() -> None:
+        async with await psycopg.AsyncConnection.connect(
+            sample_dsn,
+            autocommit=True,
+            options="-c timezone=UTC -c search_path=pg_temp",
+        ) as conn:
+            await conn.execute(sample_schema)
+
+            inserted_count = await insert_telemetry_batch_async_multi(conn, [])
+            assert inserted_count == 0
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT * FROM telemetry_messages ORDER BY sequence_no"
+                )
+                row = await cur.fetchall()
+                assert row is not None
+                assert len(row) == 0
+
+    asyncio.run(scenario())
+
+
+def test_insert_telemetry_batch_async_multi_with_constraint_violation(
+    sample_dsn: str,
+    sample_schema: str,
+    sample_message: TelemetryMessage,
+) -> None:
+    async def scenario() -> None:
+        async with await psycopg.AsyncConnection.connect(
+            sample_dsn,
+            autocommit=True,
+            options="-c timezone=UTC -c search_path=pg_temp",
+        ) as conn:
+            await conn.execute(sample_schema)
+
+            await conn.execute(
+                "ALTER TABLE pg_temp.telemetry_messages "
+                "ADD CONSTRAINT test_async_battery_limit "
+                "CHECK (battery_percent < 90)"
+            )
+            violating_message = replace(
+                sample_message,
+                sequence_no=sample_message.sequence_no + 1,
+                battery_percent=95,
+            )
+            with pytest.raises(psycopg.errors.CheckViolation):
+                await insert_telemetry_batch_async_multi(
+                    conn, [sample_message, violating_message]
+                )
+
+            async with conn.cursor() as cur:
+                await cur.execute("SELECT COUNT(*) FROM telemetry_messages")
+                row = await cur.fetchone()
+                assert row == (0,)
 
     asyncio.run(scenario())

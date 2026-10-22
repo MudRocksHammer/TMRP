@@ -149,7 +149,8 @@ See [battery alert instructions](docs/guides/alerts.md) for thresholds, state tr
 CSV report reproduction, and automated tests.
 
 See [asyncio pipeline instructions](docs/guides/async-pipeline.md) for queue behavior,
-async PostgreSQL batch storage, failure and cancellation tests, and the three-mode benchmark.
+async PostgreSQL batch storage, failure and cancellation tests, the three-mode pipeline benchmark,
+and four-mode database storage measurements with CSV and Excel reports.
 
 ## Project layout
 

@@ -43,3 +43,38 @@ def insert_telemetry_batch(
             if row:
                 inserted_count += 1
     return inserted_count
+
+
+def insert_telemetry_batch_multi(
+    conn: Connection[tuple[Any, ...]],
+    messages: Iterable[TelemetryMessage],
+) -> int:
+    items = list(messages)
+    if not items:
+        return 0
+
+    placeholders = ", ".join(["(%s, %s, %s, %s, %s)"] * len(items))
+
+    sql = f"""
+        INSERT INTO telemetry_messages (
+            device_id, sequence_no, event_time, battery_percent, payload
+        )
+        VALUES {placeholders}
+        ON CONFLICT ON CONSTRAINT telemetry_messages_event_key
+        DO NOTHING
+        RETURNING id
+    """
+    values = [
+        (
+            message.device_id,
+            message.sequence_no,
+            message.event_time,
+            message.battery_percent,
+            Jsonb(message.to_dict()),
+        )
+        for message in items
+    ]
+
+    with conn.transaction():
+        rows = conn.execute(sql, [value for tup in values for value in tup]).fetchall()
+    return len(rows)
