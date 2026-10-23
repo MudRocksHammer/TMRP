@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0",
+  "message_type": "power_telemetry",
+  "device_id": "power-meter-001",
+  "boot_id": "training-boot-001",
+  "sequence_no": 3,
+  "event_time": "2026-10-23T00:00:02Z",
+  "breaker_state": "unknown",
+  "quality": "unavailable",
+  "voltage_ab_v": null,
+  "voltage_bc_v": null,
+  "voltage_ca_v": null,
+  "current_a_a": null,
+  "current_b_a": null,
+  "current_c_a": null,
+  "active_power_kw": null,
+  "frequency_hz": null
+}

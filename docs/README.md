@@ -8,6 +8,8 @@
 ## 仕様
 
 - [Telemetryのデータ契約](reference/telemetry-contract.md)
+- [電力Telemetryのデータ契約・仮台帳・サンプル（P1）](reference/power-telemetry-contract.md)
+- [監視対象の用語集](../CONTEXT.md)
 - [設定とログ出力](reference/configuration.md)
 
 ## 利用ガイド

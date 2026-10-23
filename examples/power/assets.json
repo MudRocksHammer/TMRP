@@ -1,0 +1,151 @@
+{
+  "schema_version": "1.0",
+  "model_kind": "synthetic_training",
+  "notes": [
+    "日産6万t・給電12回線・変電所4か所という題材のための仮台帳。実設備の調査結果ではない。",
+    "各変電所3回線という割当は表示・参照整合性を学ぶための仮定。実際の電気的接続を示さない。",
+    "P1では1回線1監視機器とする。回線両端や母線連絡などの接続関係は表現していない。"
+  ],
+  "substations": [
+    {
+      "substation_id": "substation-001",
+      "display_name": "学習用第1変電所"
+    },
+    {
+      "substation_id": "substation-002",
+      "display_name": "学習用第2変電所"
+    },
+    {
+      "substation_id": "substation-003",
+      "display_name": "学習用第3変電所"
+    },
+    {
+      "substation_id": "substation-004",
+      "display_name": "学習用第4変電所"
+    }
+  ],
+  "lines": [
+    {
+      "line_id": "line-001",
+      "display_name": "学習用第1回線"
+    },
+    {
+      "line_id": "line-002",
+      "display_name": "学習用第2回線"
+    },
+    {
+      "line_id": "line-003",
+      "display_name": "学習用第3回線"
+    },
+    {
+      "line_id": "line-004",
+      "display_name": "学習用第4回線"
+    },
+    {
+      "line_id": "line-005",
+      "display_name": "学習用第5回線"
+    },
+    {
+      "line_id": "line-006",
+      "display_name": "学習用第6回線"
+    },
+    {
+      "line_id": "line-007",
+      "display_name": "学習用第7回線"
+    },
+    {
+      "line_id": "line-008",
+      "display_name": "学習用第8回線"
+    },
+    {
+      "line_id": "line-009",
+      "display_name": "学習用第9回線"
+    },
+    {
+      "line_id": "line-010",
+      "display_name": "学習用第10回線"
+    },
+    {
+      "line_id": "line-011",
+      "display_name": "学習用第11回線"
+    },
+    {
+      "line_id": "line-012",
+      "display_name": "学習用第12回線"
+    }
+  ],
+  "devices": [
+    {
+      "device_id": "power-meter-001",
+      "device_type": "power_meter",
+      "line_id": "line-001",
+      "substation_id": "substation-001"
+    },
+    {
+      "device_id": "power-meter-002",
+      "device_type": "power_meter",
+      "line_id": "line-002",
+      "substation_id": "substation-001"
+    },
+    {
+      "device_id": "power-meter-003",
+      "device_type": "power_meter",
+      "line_id": "line-003",
+      "substation_id": "substation-001"
+    },
+    {
+      "device_id": "power-meter-004",
+      "device_type": "power_meter",
+      "line_id": "line-004",
+      "substation_id": "substation-002"
+    },
+    {
+      "device_id": "power-meter-005",
+      "device_type": "power_meter",
+      "line_id": "line-005",
+      "substation_id": "substation-002"
+    },
+    {
+      "device_id": "power-meter-006",
+      "device_type": "power_meter",
+      "line_id": "line-006",
+      "substation_id": "substation-002"
+    },
+    {
+      "device_id": "power-meter-007",
+      "device_type": "power_meter",
+      "line_id": "line-007",
+      "substation_id": "substation-003"
+    },
+    {
+      "device_id": "power-meter-008",
+      "device_type": "power_meter",
+      "line_id": "line-008",
+      "substation_id": "substation-003"
+    },
+    {
+      "device_id": "power-meter-009",
+      "device_type": "power_meter",
+      "line_id": "line-009",
+      "substation_id": "substation-003"
+    },
+    {
+      "device_id": "power-meter-010",
+      "device_type": "power_meter",
+      "line_id": "line-010",
+      "substation_id": "substation-004"
+    },
+    {
+      "device_id": "power-meter-011",
+      "device_type": "power_meter",
+      "line_id": "line-011",
+      "substation_id": "substation-004"
+    },
+    {
+      "device_id": "power-meter-012",
+      "device_type": "power_meter",
+      "line_id": "line-012",
+      "substation_id": "substation-004"
+    }
+  ]
+}
