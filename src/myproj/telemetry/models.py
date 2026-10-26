@@ -1,12 +1,9 @@
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from enum import Enum
 from typing import Self
 
-
-class MessageType(Enum):
-    TELEMETRY = "telemetry"
+from myproj.telemetry.messageType import MessageType as MessageType
 
 
 class TelemetryValidationError(ValueError):

@@ -8,7 +8,7 @@
 | フォルダー | 責務 | ファイル |
 |---|---|---|
 | app | CLI、アプリケーション設定、ログ設定 | cli.py、config.py、logging_config.py |
-| telemetry | Telemetryの型・検証・JSON変換とJSONL読み込み | models.py、stream.py |
+| telemetry | ロボット・電力Telemetryの型・検証・JSON変換とJSONL読み込み | models.py、power.py、messageType.py、stream.py |
 | collection | MQTT入力の検証、同期／非同期の収集処理 | mqtt_validation.py、collector.py、async_collector.py、async_mqtt.py |
 | persistence | PostgreSQLへの同期／非同期保存 | storage.py、async_storage.py |
 | alerts | バッテリーの状態遷移とデバイス別Monitor | battery.py |

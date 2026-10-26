@@ -7,4 +7,4 @@
 - invalid/: JSONとして読めるが電力データ契約に違反するメッセージ。
 
 サンプル値・時刻・所属は試験用。現在のロボット用TelemetryMessage.from_jsonでは扱えない。
-PowerTelemetryの変換処理を実装した後に使用する。
+`PowerTelemetry.from_json()`で読み込める。利用例と単体テストの実行方法は上記の契約を参照する。

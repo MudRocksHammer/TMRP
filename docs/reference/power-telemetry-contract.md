@@ -1,6 +1,6 @@
 # 電力Telemetryのデータ契約（P1）
 
-状態: 学習用の契約初稿。本体・テストはこれから実装する。旧TelemetryMessageとは別のPowerTelemetryを追加する。
+状態: P1のモデル・入力検証・JSON相互変換と単体テストを実装済み。旧TelemetryMessageとは別のPowerTelemetryとして扱う。
 
 ## 対象と台帳
 
@@ -19,7 +19,7 @@ P1のモデルは台帳を読み込まずdevice_idの文字列形式だけを検
 | 項目 | JSONの型 | Pythonモデルの型 | 規則 |
 |---|---|---|---|
 | schema_version | string | str | "1.0"固定 |
-| message_type | string | str | "power_telemetry"固定 |
+| message_type | string | MessageType | JSONは"power_telemetry"、PythonはMessageType.POWER固定 |
 | device_id | string | str | 空・空白のみ・前後空白を拒否。自動stripしない |
 | boot_id | string | str | 同上。起動セッションを識別する |
 | sequence_no | integer | int | 0以上、boolと小数を拒否 |
@@ -96,14 +96,39 @@ P1は単件モデルなので連番の履歴や起動IDの使い回しを検出�
 
 `__post_init__`ではaware datetimeをUTCへ正規化し、数値をfloatへ正規化する。検証失敗はPowerTelemetryValidationErrorへそろえる。
 
-P1-2は型・コンストラクター検証まで。P1-3で次の変換を追加する。
+P1-2の型・コンストラクター検証に加え、P1-3の次の変換を実装済み。
 
 - `from_dict(data: object) -> Self`: 辞書、必須／未知キー、JSON側の型を確認してdatetime・Enumへ変換し、コンストラクターを呼ぶ。
 - `from_json(text: str) -> Self`: JSON解析後にfrom_dictを呼ぶ。不正JSONも独自例外へそろえる。
 - `to_dict() -> dict[str, object]`: Enumは値、日時はUTC文字列、null項目も含めて全16キーを出す。
 - `to_json() -> str`: JSONを生成する。型・値・意味が往復で一致することをテストする。
 
-既存のTelemetryMessage、MQTT入力処理、DBスキーマはこの段階で変更しない。
+共通の`MessageType`は`myproj.telemetry.messageType`に配置する。既存の
+`myproj.telemetry.models.MessageType`からも同じEnumを参照できるように再公開する。
+TelemetryMessageは従来どおりTELEMETRYだけを受理する。
+電力モデルのMQTT入力処理・DB保存への接続は後続課題とする。
+
+### 利用例と検証
+
+TMRPのルートからPythonを実行する場合:
+
+```python
+from pathlib import Path
+
+from myproj.telemetry.power import PowerTelemetry
+
+source = Path("examples/power/partial.json").read_text(encoding="utf-8")
+message = PowerTelemetry.from_json(source)
+assert message.current_b_a is None
+assert PowerTelemetry.from_json(message.to_json()) == message
+```
+
+```bash
+# 電力モデルの正常・境界・不正入力、JSON往復、既存Enumとの互換性を検証する
+.venv/bin/python -m pytest -q tests/units/telemetry/test_power_telemetry.py
+```
+
+この単体テストはDBやMQTTを使わない。検証は生成時に行うため、生成後に属性を直接変更すると再検証されない。値を更新する場合は、新しいPowerTelemetryを生成する。
 
 ## サンプルと期待結果
 
