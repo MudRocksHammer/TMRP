@@ -1,0 +1,146 @@
+import time
+from threading import Event
+from typing import Any
+
+import paho.mqtt.client as mqtt
+from loguru import logger
+from paho.mqtt.enums import CallbackAPIVersion
+from paho.mqtt.properties import Properties
+from paho.mqtt.reasoncodes import ReasonCode
+
+from myproj.app.receiver_config import ReceiverConfig
+from myproj.app.receiver_health import ReceiverHealth
+from myproj.collection.power_receiver import PowerReceiver
+from myproj.persistence.power_storage import PowerStore
+
+
+class MQTTConfigurationError(RuntimeError):
+    pass
+
+
+class ReceiptFailure(RuntimeError):
+    pass
+
+
+class PowerMQTTService:
+    def __init__(
+        self,
+        config: ReceiverConfig,
+        receiver: PowerReceiver,
+        store: PowerStore,
+        health: ReceiverHealth,
+        *,
+        password: str | None = None,
+    ) -> None:
+        self.config, self.receiver, self.store, self.health = (
+            config,
+            receiver,
+            store,
+            health,
+        )
+        self._delay = 1
+        self.client = mqtt.Client(
+            callback_api_version=CallbackAPIVersion.VERSION2,
+            client_id=config.client_id,
+            clean_session=False,
+            protocol=mqtt.MQTTv311,
+            manual_ack=True,
+            reconnect_on_failure=False,
+        )
+        self.client.connect_timeout = 5
+        if config.mqtt_username:
+            self.client.username_pw_set(config.mqtt_username, password)
+        if config.tls:
+            self.client.tls_set(
+                ca_certs=config.ca_file or None,
+                certfile=config.cert_file or None,
+                keyfile=config.key_file or None,
+            )
+        self.client.on_connect = self._on_connect
+        self.client.on_subscribe = self._on_subscribe
+        self.client.on_message = self._on_message
+
+    def _on_connect(
+        self,
+        client: mqtt.Client,
+        userdata: Any,
+        flags: mqtt.ConnectFlags,
+        reason: ReasonCode,
+        properties: Properties | None,
+    ) -> None:
+        if reason.is_failure:
+            raise MQTTConfigurationError("Broker refused connection")
+        result, _ = client.subscribe("tmrp/devices/+/telemetry", qos=1)
+        if result != mqtt.MQTT_ERR_SUCCESS:
+            raise ConnectionError("Subscribe request failed")
+
+    def _on_subscribe(
+        self,
+        client: mqtt.Client,
+        userdata: Any,
+        mid: int,
+        reasons: list[ReasonCode],
+        properties: Properties | None,
+    ) -> None:
+        if not reasons or any(reason.value != 1 for reason in reasons):
+            raise MQTTConfigurationError("Broker must grant QoS 1")
+        self.store.probe()
+        self._delay = 1
+        self.health.touch(ready=True)
+        logger.info("mqtt_subscription_ready")
+
+    def _on_message(
+        self, client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage
+    ) -> None:
+        def acknowledge() -> None:
+            if client.ack(message.mid, message.qos) != mqtt.MQTT_ERR_SUCCESS:
+                raise ConnectionError("Acknowledgment failed")
+
+        try:
+            outcome = self.receiver.handle(
+                message.topic,
+                bytes(message.payload),
+                qos=message.qos,
+                retain=message.retain,
+                acknowledge=acknowledge,
+            )
+        except Exception as exc:
+            # DBの失敗を通信エラーとして再試行しない。未ACKのまま失敗終了。
+            self.health.touch(ready=False)
+            raise ReceiptFailure("Receipt failed") from exc
+        self.health.touch(outcome=outcome)
+
+    def run(self, stop: Event) -> None:
+        try:
+            while not stop.is_set():
+                self.health.touch(ready=False)
+                try:
+                    result = self.client.connect(
+                        self.config.mqtt_host,
+                        self.config.mqtt_port,
+                        self.config.keepalive,
+                    )
+                    if result != mqtt.MQTT_ERR_SUCCESS:
+                        raise ConnectionError("Connect failed")
+                    next_probe = time.monotonic() + 5
+                    while not stop.is_set():
+                        if self.client.loop(timeout=1) != mqtt.MQTT_ERR_SUCCESS:
+                            raise ConnectionError("Connection lost")
+                        if time.monotonic() >= next_probe:
+                            self.store.probe()
+                            next_probe = time.monotonic() + 5
+                        self.health.touch()
+                except OSError:
+                    logger.bind(delay_seconds=self._delay).warning("mqtt_reconnecting")
+                finally:
+                    self.health.touch(ready=False)
+                    self.client.disconnect()
+                # 再接続待機中もlivenessを更新し、SIGTERMへ応答する。
+                for _ in range(self._delay):
+                    if stop.wait(1):
+                        break
+                    self.health.touch(ready=False)
+                self._delay = min(30, self._delay * 2)
+        finally:
+            self.health.touch(ready=False)
+            self.client.disconnect()

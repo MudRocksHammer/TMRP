@@ -15,6 +15,11 @@
 | processing | producer・Queue・アラート判定の非同期処理 | async_pipeline.py |
 
 各フォルダーに__init__.pyを置き、Pythonパッケージとして扱う。
+
+電力受信サーバーはapp/receiver.py・receiver_config.py・receiver_health.py、
+collection/power_validation.py・power_receiver.py・power_mqtt.py、
+persistence/power_storage.py・power_schema.sqlで構成する。
+配備資材はdeploy/receiver、運用手順は[電力受信サーバー](../guides/power-receiver.md)に置く。
 ルートのmyproj/__init__.pyはパッケージの入口として残す。
 内部importは機能フォルダーまで指定する。
 
@@ -80,6 +85,8 @@ bash scripts/dev/check_test.sh --db
 | telemetry | generate_sample_telemetry.py: 学習用JSONL生成 |
 | analysis | analyze_sample_telemetry.py、report_battery_alerts.py: 分析・CSV出力 |
 | mqtt | publish_telemetry.py、subscribe_telemetry.py、subscribe_telemetry_async.py: MQTT送受信 |
+| mqtt | simulate_power.py: 電力データを12機器×1 Hzで継続送信。頻度・回数を指定可能 |
+| server | start_server.sh: 設定検査・任意のDB初期化・受信サーバー起動 |
 | persistence | store_sample_telemetry.py: DB保存の実行例 |
 | processing | compare_async_telemetry.py: 模擬受信待ちの比較、compare_db_storage.py: DB保存4方式の比較・CSV／Excel出力 |
 

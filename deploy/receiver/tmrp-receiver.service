@@ -1,0 +1,28 @@
+[Unit]
+Description=TMRP power telemetry receiver
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+User=tmrp
+Group=tmrp
+WorkingDirectory=/opt/tmrp
+EnvironmentFile=/etc/tmrp/receiver.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/tmrp/.venv/bin/python -m myproj.app.receiver --config /etc/tmrp/receiver.toml
+Restart=on-failure
+RestartSec=5
+RestartPreventExitStatus=2
+TimeoutStopSec=30
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

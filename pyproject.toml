@@ -48,6 +48,10 @@ pythonpath = ["src"]
 
 [project.scripts]
 tmrp = "myproj.app.cli:main"
+tmrp-receiver = "myproj.app.receiver:main"
+
+[tool.setuptools.package-data]
+"myproj.persistence" = ["power_schema.sql"]
 
 [tool.mypy]
 python_version = "3.12"

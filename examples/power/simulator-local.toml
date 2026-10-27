@@ -1,0 +1,6 @@
+# 12機器を各1 Hzで送信する。頻度はCLIの--rate-hzで変更できる。
+assets = "assets.json"
+client_id = "power-simulator"
+mqtt_host = "127.0.0.1"
+mqtt_port = 18884
+# 実環境では送信専用アカウントを使い、パスワードはTMRP_SIMULATOR_PASSWORDで渡す。
