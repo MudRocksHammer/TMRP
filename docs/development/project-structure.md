@@ -20,6 +20,8 @@
 collection/power_validation.py・power_receiver.py・power_mqtt.py、
 persistence/power_storage.py・power_schema.sqlで構成する。
 配備資材はdeploy/receiver、運用手順は[電力受信サーバー](../guides/power-receiver.md)に置く。
+専用スキーマ・一時Brokerを使う性能試験器はscripts/benchmark、実測結果はreports/power-performance-*に置く。
+条件・判定基準は[性能試験計画](power-performance-plan.md)を参照する。
 ルートのmyproj/__init__.pyはパッケージの入口として残す。
 内部importは機能フォルダーまで指定する。
 

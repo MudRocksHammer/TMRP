@@ -1,0 +1,80 @@
+{
+  "started_at_utc": "2026-10-29T10:59:25.151479+00:00",
+  "environment": {
+    "platform": "Linux-6.8.0-147-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "logical_cpus": 16,
+    "benchmark_sha256": "f4b27e058d15e6e3556e5c9f7f4f1f587d97539123990b53df350f7b349b6285",
+    "meminfo": "MemTotal:        3960876 kB\nMemFree:          198156 kB\nMemAvailable:    1176648 kB\nBuffers:           81532 kB\nCached:          1032552 kB\nSwapCached:        15204 kB\nActive:          1736328 kB\nInactive:        1438340 kB\nActive(anon):    1452832 kB\nInactive(anon):   644916 kB\nActive(file):     283496 kB\nInactive(file):   793424 kB\nUnevictable:       27560 kB\nMlocked:           27560 kB\nSwapTotal:       2965500 kB\nSwapFree:        2517948 kB\nZswap:                 0 kB\nZswapped:              0 kB\nDirty:               160 kB\nWriteback:             0 kB\nAnonPages:       2078524 kB\nMapped:           513048 kB\nShmem:             28476 kB\nKReclaimable:     190708 kB\nSlab:             364900 kB\nSReclaimable:     190708 kB\nSUnreclaim:       174192 kB\nKernelStack:       14336 kB\nPageTables:        46604 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:     4945936 kB\nCommitted_AS:    5413720 kB\nVmallocTotal:   34359738367 kB\nVmallocUsed:       37072 kB\nVmallocChunk:          0 kB\nPercpu:            76288 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:         0 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nUnaccepted:            0 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\nDirectMap4k:      225088 kB\nDirectMap2M:     2920448 kB\nDirectMap1G:     3145728 kB\n",
+    "database": {
+      "fsync": "on",
+      "full_page_writes": "on",
+      "server_version": "16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)",
+      "shared_buffers": "16384",
+      "synchronous_commit": "on"
+    },
+    "packages": {
+      "psycopg": "3.3.6",
+      "paho-mqtt": "2.1.0",
+      "loguru": "0.7.3"
+    },
+    "git_head": "b805f4bf7ad88d4e110ec3068c39cf12d33c2039"
+  },
+  "scope": "local plaintext MQTT, 12 connections, file JSON logging, shared PostgreSQL; not production acceptance",
+  "results": [
+    {
+      "scenario": "baseline",
+      "target_messages_per_second": 12,
+      "duration_seconds": 10,
+      "connections": 12,
+      "offered": 120,
+      "broker_confirmed": 120,
+      "stored_rows": 120,
+      "unstored_rows_at_stop": 0,
+      "expected_rows": 120,
+      "database_matches": true,
+      "outcomes": {
+        "stored": 120
+      },
+      "outcomes_match": true,
+      "processing_errors": 0,
+      "ready_at_end": true,
+      "send_seconds": 9.91855724999914,
+      "drain_seconds": 0.06791517600504449,
+      "offered_per_second": 12.098533786253077,
+      "stored_per_second_including_drain": 12.016255077971987,
+      "send_lag_p99_ms": 1.78672066249419,
+      "clock_drift_ms": 0.033025615266524255,
+      "scheduled_to_processed_p95_ms": 13.350486755371094,
+      "scheduled_to_processed_p99_ms": 16.188621520996094,
+      "scheduled_to_processed_max_ms": 19.573450088500977,
+      "publish_to_processed_p99_ms": 15.24496078491211,
+      "handler_p99_ms": 10.874,
+      "receiver_peak_rss_mib": 38.5625,
+      "receiver_rss_growth_mib": 0.0,
+      "receiver_cpu_percent_one_core": 7.365444102504808,
+      "unready_samples": 0,
+      "max_observed_pending": 1,
+      "database_bytes": 196608,
+      "receiver_log_bytes": 249797,
+      "payload_bytes_mean": 495.6333333333333,
+      "checks": {
+        "all_broker_confirmed": true,
+        "exact_database_contents": true,
+        "all_outcomes_observed": true,
+        "no_processing_errors": true,
+        "receiver_alive_and_ready": true,
+        "load_generator_kept_up": true,
+        "receiver_rss_below_256_mib": true,
+        "drained_within_30_seconds": true,
+        "clock_drift_below_50_ms": true,
+        "scheduled_latency_p95_below_500_ms": true,
+        "scheduled_latency_p99_below_1000_ms": true,
+        "no_readiness_failures": true,
+        "receiver_cpu_below_70_percent_of_one_core": true
+      },
+      "load_valid": true,
+      "passed": true
+    }
+  ]
+}

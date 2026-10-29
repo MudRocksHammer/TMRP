@@ -1,0 +1,4 @@
+assets = "/home/shou/pythonLearning/TMRP/examples/power/assets.json"
+client_id = "perf_power_9251d89f6c0f402192a01ec8fd396427"
+mqtt_port = 54179
+health_port = 56863
