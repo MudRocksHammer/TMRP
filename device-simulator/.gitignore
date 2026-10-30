@@ -3,4 +3,6 @@ build*/
 *.user
 *.sqlite*
 *.lock
+local-state/
+vcpkg_installed/
 

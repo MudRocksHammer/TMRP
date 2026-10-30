@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0",
+  "devices": [
+    {
+      "name": "回線001",
+      "device_id": "power-meter-001",
+      "equipment_id": "breaker-001",
+      "host": "127.0.0.1",
+      "port": 18884,
+      "source_ip": "",
+      "username": "",
+      "tls": false,
+      "ca_file": "",
+      "rate_hz": 1.0,
+      "operation_delay_ms": 300
+    },
+    {
+      "name": "回線002",
+      "device_id": "power-meter-002",
+      "equipment_id": "breaker-002",
+      "host": "127.0.0.1",
+      "port": 18884,
+      "source_ip": "",
+      "username": "",
+      "tls": false,
+      "ca_file": "",
+      "rate_hz": 1.0,
+      "operation_delay_ms": 300
+    }
+  ]
+}

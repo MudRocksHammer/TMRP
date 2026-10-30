@@ -10,7 +10,7 @@
 
 class DeviceEngine : public QObject {
     Q_OBJECT
-public:
+  public:
     DeviceEngine(QString deviceId, QString equipmentId, QString databasePath,
                  QObject *parent = nullptr);
     ~DeviceEngine() override;
@@ -29,13 +29,13 @@ public:
     bool acknowledgeResult(const QString &id, const QByteArray &payload);
     static bool validId(const QString &value);
 
-signals:
+  signals:
     void stateChanged();
     void commandResult(const QJsonObject &result);
     void problem(const QString &message);
     void busyChanged(bool busy);
 
-private:
+  private:
     bool executeSql(const QString &statement);
     bool persistState(const QJsonObject &state);
     bool storeResult(const QString &id, const QByteArray &request, const QJsonObject &result);
@@ -51,4 +51,3 @@ private:
     qint64 m_sequence = 0;
     int m_delay = 300;
 };
-

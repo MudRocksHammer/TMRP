@@ -1,0 +1,5 @@
+{
+  "name": "tmrp-device-simulator",
+  "version-string": "0.1.0",
+  "dependencies": ["mosquitto"]
+}

@@ -6,7 +6,7 @@ cmake_bin=cmake
 cmake_options=()
 if [[ -x "$qt_prefix/bin/cmake" ]]; then
     cmake_bin="$qt_prefix/bin/cmake"
-    export LD_LIBRARY_PATH="$qt_prefix/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    export LD_LIBRARY_PATH="$qt_prefix/lib/x86_64-linux-gnu:$qt_prefix/lib/x86_64-linux-gnu/libproxy${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     export QT_PLUGIN_PATH="$qt_prefix/lib/x86_64-linux-gnu/qt6/plugins"
     if [[ -f "$qt_prefix/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc" ]]; then
         export TMRP_SIMULATOR_FONT="$qt_prefix/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"

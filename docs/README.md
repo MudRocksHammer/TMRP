@@ -5,6 +5,7 @@
 - [プロジェクト構成とファイルの置き場所](development/project-structure.md)
 - [導入後の検証手順](development/verification.md)
 - [電力受信サーバーの検証結果](development/power-receiver-verification.md)
+- [C++/Qt模擬設備の検証結果](development/qt-simulator-verification.md)
 - [受信サーバーの性能試験条件・合格基準](development/power-performance-plan.md)
 - [受信サーバーの性能実測結果（2026-10-29）](development/power-performance-results-20261029.md)
 
@@ -22,6 +23,8 @@
 - [非同期MQTT購読とDB保存](guides/async-mqtt.md)
 - [電力遥測受信サーバーの仕様・起動・systemd配備](guides/power-receiver.md)
 - [サーバー起動スクリプトと電力データの継続送信](guides/power-simulator.md)
+- [C++/Qt模擬設備：複数設備管理・Windows/Linuxビルド](../device-simulator/README.md)
+- [WindowsからVMware上のUbuntuサーバーへ接続](guides/qt-simulator-vm.md)
 - [PostgreSQLへの保存](guides/storage.md)
 - [低バッテリーアラート](guides/alerts.md)
 - [非同期パイプライン・DB保存・比較実験](guides/async-pipeline.md)

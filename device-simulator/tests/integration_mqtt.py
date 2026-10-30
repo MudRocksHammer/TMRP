@@ -84,12 +84,40 @@ def run():
                 scoped = make_conninfo(dsn, options=f"-c search_path={schema}")
                 with psycopg.connect(scoped, autocommit=True) as database:
                     initialize_power_schema(database)
-                    port, health_port = free_port(), free_port()
-                    while port == health_port:
-                        health_port = free_port()
+                    ports = set()
+                    while len(ports) < 3:
+                        ports.add(free_port())
+                    port, tls_port, health_port = sorted(ports)
+                    subprocess.run(
+                        [
+                            "openssl",
+                            "req",
+                            "-x509",
+                            "-newkey",
+                            "rsa:2048",
+                            "-nodes",
+                            "-days",
+                            "1",
+                            "-keyout",
+                            str(folder / "server.key"),
+                            "-out",
+                            str(folder / "ca.crt"),
+                            "-subj",
+                            "/CN=localhost",
+                            "-addext",
+                            "subjectAltName=DNS:localhost,IP:127.0.0.1",
+                        ],
+                        check=True,
+                        capture_output=True,
+                        timeout=15,
+                    )
                     config = folder / "mosquitto.conf"
                     config.write_text(
-                        f"listener {port} 127.0.0.1\nallow_anonymous true\npersistence false\n"
+                        f"listener {port} 127.0.0.1\n"
+                        "allow_anonymous true\npersistence false\n"
+                        f"listener {tls_port} 127.0.0.1\nallow_anonymous true\n"
+                        f"certfile {folder / 'ca.crt'}\n"
+                        f"keyfile {folder / 'server.key'}\n"
                     )
 
                     def spawn(args, name, env=None):
@@ -173,14 +201,40 @@ def run():
                                 return value
                         raise AssertionError("Expected MQTT message was not received")
 
-                    app_config = folder / "app.ini"
+                    app_config = folder / "fleet.json"
                     app_config.write_text(
-                        f"[mqtt]\nhost=127.0.0.1\nport={port}\n[telemetry]\nrate_hz=2\n"
+                        json.dumps(
+                            {
+                                "schema_version": "1.0",
+                                "devices": [
+                                    {
+                                        "name": f"test-{number}",
+                                        "device_id": f"power-meter-{number:03}",
+                                        "equipment_id": f"breaker-{number:03}",
+                                        "host": "127.0.0.1",
+                                        "port": port if number == 1 else tls_port,
+                                        "source_ip": "127.0.0.1",
+                                        "username": "",
+                                        "tls": number == 2,
+                                        "ca_file": str(folder / "ca.crt"),
+                                        "rate_hz": 2,
+                                        "operation_delay_ms": 100,
+                                    }
+                                    for number in (1, 2)
+                                ],
+                            }
+                        )
                     )
                     env = {**os.environ, "QT_QPA_PLATFORM": "offscreen"}
                     prefix = ROOT / "device-simulator/.deps/qt/usr"
                     if prefix.exists():
-                        env["LD_LIBRARY_PATH"] = str(prefix / "lib/x86_64-linux-gnu")
+                        env["LD_LIBRARY_PATH"] = ":".join(
+                            str(prefix / subdir)
+                            for subdir in (
+                                "lib/x86_64-linux-gnu",
+                                "lib/x86_64-linux-gnu/libproxy",
+                            )
+                        )
                         env["QT_PLUGIN_PATH"] = str(
                             prefix / "lib/x86_64-linux-gnu/qt6/plugins"
                         )
@@ -189,7 +243,7 @@ def run():
                         return spawn(
                             [
                                 str(binary),
-                                "--config",
+                                "--fleet",
                                 str(app_config),
                                 "--state-dir",
                                 str(folder / "state"),
@@ -202,7 +256,12 @@ def run():
                         )
 
                     app = start_app()
-                    first = wait_message(lambda t, v: t.endswith("/telemetry"))
+                    first = wait_message(
+                        lambda t, v: (
+                            t.endswith("/telemetry")
+                            and v["device_id"] == "power-meter-001"
+                        )
+                    )
                     PowerTelemetry.from_dict(first)
                     assert first["breaker_state"] == "closed"
                     eventually(
@@ -216,19 +275,20 @@ def run():
 
                     def send(value):
                         info = observer.publish(
-                            "tmrp/devices/power-meter-001/commands",
+                            f"tmrp/devices/{value['device_id']}/commands",
                             json.dumps(value),
                             qos=1,
                         )
                         info.wait_for_publish(timeout=3)
                         assert info.is_published()
 
-                    def result(identity, status):
+                    def result(identity, status, device="power-meter-001"):
                         return wait_message(
                             lambda t, v: (
                                 t.endswith("/command-results")
                                 and v["command_id"] == identity
                                 and v["status"] == status
+                                and v["device_id"] == device
                             )
                         )
 
@@ -245,6 +305,30 @@ def run():
                     PowerTelemetry.from_dict(opened)
                     assert opened["current_a_a"] == opened["active_power_kw"] == 0
                     assert opened["voltage_ab_v"] == 10000
+                    second = wait_message(
+                        lambda t, v: (
+                            t.endswith("/telemetry")
+                            and v["device_id"] == "power-meter-002"
+                        )
+                    )
+                    assert second["breaker_state"] == "closed"
+                    assert second["boot_id"] != first["boot_id"]
+                    PowerTelemetry.from_dict(second)
+                    # Same command_id is independent on different equipment.
+                    send(
+                        {
+                            **opening,
+                            "device_id": "power-meter-002",
+                            "equipment_id": "breaker-002",
+                            "operation": "close_breaker",
+                        }
+                    )
+                    assert (
+                        result("open-1", "completed", "power-meter-002")[
+                            "state_version"
+                        ]
+                        == 0
+                    )
                     send(opening)
                     assert (
                         result("open-1", "completed")["state_version"]
@@ -259,6 +343,7 @@ def run():
                     restarted = wait_message(
                         lambda t, v: (
                             t.endswith("/telemetry")
+                            and v["device_id"] == "power-meter-001"
                             and v["boot_id"] != first["boot_id"]
                         )
                     )
@@ -271,16 +356,47 @@ def run():
                     closing = command("close-2", "close_breaker")
                     send(closing)
                     assert result("close-2", "completed")["breaker_state"] == "closed"
+                    # Exercise the documented command helper and identical retry.
+                    helper = ROOT / "device-simulator/scripts/send_command.py"
+                    saved = folder / "helper-command.json"
+                    for arguments in (
+                        ["--operation", "close_breaker", "--save-command", str(saved)],
+                        ["--command-file", str(saved)],
+                    ):
+                        response = subprocess.run(
+                            [
+                                sys.executable,
+                                str(helper),
+                                "--port",
+                                str(port),
+                                *arguments,
+                            ],
+                            capture_output=True,
+                            text=True,
+                            timeout=20,
+                        )
+                        assert response.returncode == 0, response.stderr
+                        assert '"status": "completed"' in response.stdout
                     # Broker restart: both the C++ client and Python receiver reconnect.
                     stop(broker)
                     time.sleep(1)
+                    while not inbox.empty():
+                        inbox.get_nowait()
                     broker = spawn(
                         ["mosquitto", "-c", str(config)], "broker-restarted.log"
                     )
                     eventually(listening)
+                    wait_message(
+                        lambda t, v: (
+                            t.endswith("/status")
+                            and v["device_id"] == "power-meter-001"
+                            and v["online"]
+                        )
+                    )
                     reconnected = wait_message(
                         lambda t, v: (
                             t.endswith("/telemetry")
+                            and v["device_id"] == "power-meter-001"
                             and v["sequence_no"] > restarted["sequence_no"]
                         )
                     )
@@ -294,7 +410,8 @@ def run():
                     eventually(
                         lambda: (
                             database.execute(
-                                "SELECT count(*) FROM power_telemetry WHERE payload->>'breaker_state'='open'"
+                                "SELECT count(*) FROM power_telemetry "
+                                "WHERE payload->>'breaker_state'='open'"
                             ).fetchone()[0]
                             > 0
                         )
@@ -305,8 +422,16 @@ def run():
                         ).fetchone()[0]
                         == 0
                     )
+                    assert (
+                        database.execute(
+                            "SELECT count(DISTINCT device_id) FROM power_telemetry"
+                        ).fetchone()[0]
+                        == 2
+                    )
                     print(
-                        "PASS: Qt telemetry -> real receiver -> PostgreSQL; commands, duplicates, conflicts, restart and broker recovery"
+                        "PASS: two independent Qt devices (plain MQTT + TLS) "
+                        "-> Python receiver -> PostgreSQL; "
+                        "commands, duplicates, conflicts, restart and broker recovery"
                     )
             finally:
                 if observer:
