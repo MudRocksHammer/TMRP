@@ -1,0 +1,27 @@
+assets = "assets.json"
+client_id = "tmrp-power-local-01"
+mqtt_host = "127.0.0.1"
+mqtt_port = 18884
+health_host = "127.0.0.1"
+health_port = 8081
+
+api_enabled = true
+api_host = "0.0.0.0"
+api_port = 8443
+api_cert_file = "../../.local/https/server.crt"
+api_key_file = "../../.local/https/server.key"
+
+# HTTPSから操作を許可する模擬設備。未登録の設備には指令を送らない。
+[api_command_targets]
+power-meter-001 = "breaker-001"
+power-meter-002 = "breaker-002"
+power-meter-003 = "breaker-003"
+power-meter-004 = "breaker-004"
+power-meter-005 = "breaker-005"
+power-meter-006 = "breaker-006"
+power-meter-007 = "breaker-007"
+power-meter-008 = "breaker-008"
+power-meter-009 = "breaker-009"
+power-meter-010 = "breaker-010"
+power-meter-011 = "breaker-011"
+power-meter-012 = "breaker-012"

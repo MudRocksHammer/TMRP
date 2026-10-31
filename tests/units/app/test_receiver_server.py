@@ -128,3 +128,47 @@ def test_fatal_processing_error_does_not_retry():
             service.run(Event())
         assert client.connect.call_count == 1
         assert client.disconnect.called
+
+
+@pytest.mark.parametrize("database_fails", [False, True])
+def test_command_results_commit_before_ack(database_fails):
+    actions = []
+    commands = Mock()
+
+    def save(result):
+        if database_fails:
+            raise OSError("database down")
+        actions.append("committed")
+
+    commands.save_result.side_effect = save
+    client = Mock()
+    client.ack.side_effect = lambda *args: actions.append("ack") or 0
+    service = PowerMQTTService(
+        ReceiverConfig("a", "r"), Mock(), Mock(), ReceiverHealth(), commands=commands
+    )
+    payload = {
+        "schema_version": "1.0",
+        "message_type": "command_result",
+        "device_id": "power-meter-001",
+        "equipment_id": "breaker-001",
+        "command_id": "cmd-1",
+        "status": "completed",
+        "reason": "",
+        "state_version": 1,
+        "breaker_state": "open",
+        "event_time": "2026-10-31T00:00:00Z",
+    }
+    message = Mock(
+        topic="tmrp/devices/power-meter-001/command-results",
+        payload=json.dumps(payload).encode(),
+        qos=1,
+        retain=False,
+        mid=7,
+    )
+    if database_fails:
+        with pytest.raises(ReceiptFailure):
+            service._on_message(client, None, message)
+        client.ack.assert_not_called()
+    else:
+        service._on_message(client, None, message)
+        assert actions == ["committed", "ack"]

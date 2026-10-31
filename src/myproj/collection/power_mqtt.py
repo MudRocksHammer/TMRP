@@ -1,3 +1,4 @@
+import json
 import time
 from threading import Event
 from typing import Any
@@ -11,7 +12,10 @@ from paho.mqtt.reasoncodes import ReasonCode
 from myproj.app.receiver_config import ReceiverConfig
 from myproj.app.receiver_health import ReceiverHealth
 from myproj.collection.power_receiver import PowerReceiver
+from myproj.collection.power_validation import strict_json
+from myproj.persistence.control_store import CommandOutbox
 from myproj.persistence.power_storage import PowerStore
+from myproj.telemetry.commands import CommandResult
 
 
 class MQTTConfigurationError(RuntimeError):
@@ -31,6 +35,7 @@ class PowerMQTTService:
         health: ReceiverHealth,
         *,
         password: str | None = None,
+        commands: CommandOutbox | None = None,
     ) -> None:
         self.config, self.receiver, self.store, self.health = (
             config,
@@ -39,6 +44,9 @@ class PowerMQTTService:
             health,
         )
         self._delay = 1
+        self.commands = commands
+        self._subscribed = False
+        self._next_dispatch = 0.0
         self.client = mqtt.Client(
             callback_api_version=CallbackAPIVersion.VERSION2,
             client_id=config.client_id,
@@ -48,6 +56,7 @@ class PowerMQTTService:
             reconnect_on_failure=False,
         )
         self.client.connect_timeout = 5
+        self.client.max_queued_messages_set(32)
         if config.mqtt_username:
             self.client.username_pw_set(config.mqtt_username, password)
         if config.tls:
@@ -70,7 +79,10 @@ class PowerMQTTService:
     ) -> None:
         if reason.is_failure:
             raise MQTTConfigurationError("Broker refused connection")
-        result, _ = client.subscribe("tmrp/devices/+/telemetry", qos=1)
+        topics = [("tmrp/devices/+/telemetry", 1)]
+        if self.commands is not None:
+            topics.append(("tmrp/devices/+/command-results", 1))
+        result, _ = client.subscribe(topics)
         if result != mqtt.MQTT_ERR_SUCCESS:
             raise ConnectionError("Subscribe request failed")
 
@@ -86,6 +98,7 @@ class PowerMQTTService:
             raise MQTTConfigurationError("Broker must grant QoS 1")
         self.store.probe()
         self._delay = 1
+        self._subscribed = True
         self.health.touch(ready=True)
         logger.info("mqtt_subscription_ready")
 
@@ -97,22 +110,69 @@ class PowerMQTTService:
                 raise ConnectionError("Acknowledgment failed")
 
         try:
-            outcome = self.receiver.handle(
-                message.topic,
-                bytes(message.payload),
-                qos=message.qos,
-                retain=message.retain,
-                acknowledge=acknowledge,
-            )
+            if self.commands is not None and message.topic.endswith("/command-results"):
+                outcome = "command_result"
+                try:
+                    if (
+                        message.retain
+                        or message.qos != 1
+                        or len(message.payload) > 16384
+                    ):
+                        raise ValueError("Invalid command result envelope")
+                    result = CommandResult.model_validate(
+                        strict_json(bytes(message.payload).decode("utf-8"))
+                    )
+                    if (
+                        message.topic
+                        != f"tmrp/devices/{result.device_id}/command-results"
+                    ):
+                        raise ValueError("Topic mismatch")
+                except (ValueError, UnicodeError):
+                    logger.warning("command_result_rejected")
+                else:
+                    self.commands.save_result(result)
+                    logger.bind(
+                        device_id=result.device_id,
+                        command_id=result.command_id,
+                        status=result.status,
+                    ).info("command_result_received")
+                acknowledge()
+            else:
+                outcome = self.receiver.handle(
+                    message.topic,
+                    bytes(message.payload),
+                    qos=message.qos,
+                    retain=message.retain,
+                    acknowledge=acknowledge,
+                )
         except Exception as exc:
             # DBの失敗を通信エラーとして再試行しない。未ACKのまま失敗終了。
             self.health.touch(ready=False)
             raise ReceiptFailure("Receipt failed") from exc
         self.health.touch(outcome=outcome)
 
+    def _dispatch_commands(self) -> None:
+        if (
+            self.commands is None
+            or not self._subscribed
+            or time.monotonic() < self._next_dispatch
+        ):
+            return
+        self._next_dispatch = time.monotonic() + 1
+        for command in self.commands.due():
+            info = self.client.publish(
+                f"tmrp/devices/{command['device_id']}/commands",
+                json.dumps(command),
+                qos=1,
+                retain=False,
+            )
+            if info.rc != mqtt.MQTT_ERR_SUCCESS:
+                raise ConnectionError("Command publish unavailable")
+
     def run(self, stop: Event) -> None:
         try:
             while not stop.is_set():
+                self._subscribed = False
                 self.health.touch(ready=False)
                 try:
                     result = self.client.connect(
@@ -126,6 +186,7 @@ class PowerMQTTService:
                     while not stop.is_set():
                         if self.client.loop(timeout=1) != mqtt.MQTT_ERR_SUCCESS:
                             raise ConnectionError("Connection lost")
+                        self._dispatch_commands()
                         if time.monotonic() >= next_probe:
                             self.store.probe()
                             next_probe = time.monotonic() + 5

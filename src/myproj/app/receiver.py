@@ -9,11 +9,13 @@ from types import FrameType
 import psycopg
 from loguru import logger
 
+from myproj.app.control_api import APIServer, create_api, validate_api_settings
 from myproj.app.receiver_config import load_receiver_config
 from myproj.app.receiver_health import HealthServer, ReceiverHealth
 from myproj.collection.power_mqtt import MQTTConfigurationError, PowerMQTTService
 from myproj.collection.power_receiver import PowerReceiver
 from myproj.collection.power_validation import PowerValidator, load_power_devices
+from myproj.persistence.control_store import CommandOutbox, ControlStore
 from myproj.persistence.power_storage import PowerStore, initialize_power_schema
 
 
@@ -37,6 +39,11 @@ def main() -> int:
         validator = PowerValidator(
             load_power_devices(Path(config.assets)), config.max_payload_bytes
         )
+        api_tokens = (
+            validate_api_settings(config, validator.device_ids)
+            if config.api_enabled
+            else None
+        )
         if args.check_config:
             logger.info("receiver_config_valid")
             return 0
@@ -50,6 +57,7 @@ def main() -> int:
 
     stop = Event()
     health_server: HealthServer | None = None
+    api_server: APIServer | None = None
 
     def request_stop(signum: int, frame: FrameType | None) -> None:
         stop.set()
@@ -80,6 +88,22 @@ def main() -> int:
             health = ReceiverHealth()
             health_server = HealthServer(config.health_host, config.health_port, health)
             health_server.start()
+            commands = CommandOutbox(conn) if config.api_enabled else None
+            if api_tokens is not None:
+                api_server = APIServer(
+                    config,
+                    create_api(
+                        config,
+                        ControlStore(dsn),
+                        health,
+                        validator.device_ids,
+                        *api_tokens,
+                    ),
+                )
+                api_server.start()
+                logger.bind(host=config.api_host, port=config.api_port).info(
+                    "https_api_started"
+                )
             try:
                 service = PowerMQTTService(
                     config,
@@ -87,6 +111,7 @@ def main() -> int:
                     store,
                     health,
                     password=os.environ.get("TMRP_MQTT_PASSWORD"),
+                    commands=commands,
                 )
             except (OSError, ValueError) as exc:
                 raise MQTTConfigurationError("Invalid MQTT/TLS configuration") from exc
@@ -100,6 +125,8 @@ def main() -> int:
         logger.bind(error_type=type(exc).__name__).error("receiver_failed")
         return 1
     finally:
+        if api_server is not None:
+            api_server.close()
         if health_server is not None:
             health_server.close()
         for sig, handler in previous.items():

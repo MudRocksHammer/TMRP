@@ -20,6 +20,7 @@ dist/
 *egg-info/
 
 # Environment variables and secrets
+.local/
 .env
 .env.*
 !.env.example

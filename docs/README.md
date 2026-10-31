@@ -22,6 +22,7 @@
 - [MQTTの送受信](guides/mqtt.md)
 - [非同期MQTT購読とDB保存](guides/async-mqtt.md)
 - [電力遥測受信サーバーの仕様・起動・systemd配備](guides/power-receiver.md)
+- [監視クライアント用HTTPS API](guides/https-api.md)
 - [サーバー起動スクリプトと電力データの継続送信](guides/power-simulator.md)
 - [C++/Qt模擬設備：複数設備管理・Windows/Linuxビルド](../device-simulator/README.md)
 - [WindowsからVMware上のUbuntuサーバーへ接続](guides/qt-simulator-vm.md)

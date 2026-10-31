@@ -7,6 +7,7 @@ C++/Qtの模擬設備アプリで、データ送信と遮断器の開閉指令�
 
 - **受信サーバー**：MQTTの電力データを検証し、機器台帳と照合して保存する。重複を除外し、不正データの拒否理由を記録する。DBへのコミット後にMQTT ACKを返す。
 - **運転監視**：受信・保存結果のログ、HTTPヘルスチェック、MQTT再接続、systemd用サービス定義。
+- **HTTPS API**：認証付きの設備一覧・履歴取得、模擬設備への開閉指令、操作結果の照会。
 - **模擬設備アプリ**：複数設備の追加・設定、周期送信、測定値の変更、開閉指令の受信・応答、設備状態と指令履歴の保存。
 - **試験用ツール**：12台の電力計を模擬する継続送信器、指令送信器、受信サーバーの性能測定。
 - **分析ツール**：TelemetryのJSON検証、時系列集計・グラフ、低バッテリー判定、CSV／Excel出力。
@@ -21,6 +22,7 @@ C++/Qtの模擬設備アプリで、データ送信と遮断器の開閉指令�
 | 対象 | 技術 |
 |---|---|
 | 受信サーバー | Python 3.12以上、Paho MQTT、Psycopg 3、Loguru |
+| クライアントAPI | FastAPI、Uvicorn、Pydantic、HTTPS／Bearer認証 |
 | 通信・DB | MQTT 3.1.1／QoS 1、Mosquitto、PostgreSQL／JSONB |
 | 模擬設備 | C++17、Qt 6 Widgets、libmosquitto、SQLite |
 | 分析・非同期処理 | NumPy、Pandas、Matplotlib、openpyxl、asyncio、aiomqtt |
@@ -96,5 +98,6 @@ psql "host=/var/run/postgresql dbname=tmrp_dev user=$(id -un)" \
 ```
 
 GUIから送信・操作する場合は[模擬設備アプリの起動手順](device-simulator/README.md)を使う。
+監視クライアントから履歴取得・操作を行う場合は[HTTPS APIの起動手順](docs/guides/https-api.md)を使う。
 WindowsからUbuntu VMへ接続する方法は[VM接続ガイド](docs/guides/qt-simulator-vm.md)、
 systemdでの常駐起動は[サーバー配備手順](docs/guides/power-receiver.md#linuxサーバーへの配備)を参照。

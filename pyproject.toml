@@ -13,11 +13,15 @@ dependencies = [
     "paho-mqtt>=2.1,<3.0",
     "psycopg[binary]>=3.2,<4.0",
     "aiomqtt>=2.5.1,<3.0",
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.30,<1",
+    "pydantic>=2.9,<3",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8",
+    "httpx>=0.28,<1",
     "ruff>=0.6",
     "mypy",
     "types-openpyxl>=3.1,<4.0"

@@ -2,17 +2,21 @@ import json
 import os
 import shutil
 import socket
+import ssl
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 from unittest.mock import Mock
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 from uuid import uuid4
 
+import httpx
+import paho.mqtt.client as mqtt
 import psycopg
 import pytest
 from paho.mqtt import publish
@@ -21,7 +25,13 @@ from psycopg.conninfo import make_conninfo
 
 from myproj.collection.power_receiver import PowerReceiver
 from myproj.collection.power_validation import PowerValidator
+from myproj.persistence.control_store import (
+    CommandConflict,
+    CommandOutbox,
+    ControlStore,
+)
 from myproj.persistence.power_storage import PowerStore, initialize_power_schema
+from myproj.telemetry.commands import CommandRequest, CommandResult
 
 ROOT = Path(__file__).resolve().parents[3]
 TOPIC = "tmrp/devices/power-meter-001/telemetry"
@@ -265,7 +275,7 @@ def health_code(port):
 
 
 @pytest.fixture
-def server(tmp_path, power_db, broker):
+def server(tmp_path, power_db, broker, request):
     dsn, _ = power_db
     port = free_port()
     config = tmp_path / "receiver.toml"
@@ -274,6 +284,16 @@ def server(tmp_path, power_db, broker):
         f'client_id = "integration-receiver"\nmqtt_port = {broker.port}\n'
         f"health_port = {port}\n"
     )
+    api_port, cert = None, None
+    if getattr(request, "param", False):
+        cert, key = request.getfixturevalue("api_tls_material")
+        api_port = free_port()
+        with config.open("a") as target:
+            target.write(
+                f"api_enabled=true\napi_port={api_port}\n"
+                f'api_cert_file="{cert}"\napi_key_file="{key}"\n'
+                '[api_command_targets]\npower-meter-001="breaker-001"\n'
+            )
     processes = []
 
     def start():
@@ -293,6 +313,8 @@ def server(tmp_path, power_db, broker):
                 "PYTHONPATH": str(ROOT / "src"),
                 "TMRP_RECEIVER_DSN": dsn,
                 "TMRP_PYTHON": sys.executable,
+                "TMRP_API_READ_TOKEN": "r" * 32,
+                "TMRP_API_CONTROL_TOKEN": "c" * 32,
             },
             stdout=log,
             stderr=log,
@@ -307,13 +329,19 @@ def server(tmp_path, power_db, broker):
         return process
 
     try:
-        yield SimpleNamespace(start=start, health_port=port, config=config)
+        yield SimpleNamespace(
+            start=start,
+            health_port=port,
+            config=config,
+            api_port=api_port,
+            certificate=cert,
+        )
     finally:
         for process, log in processes:
             if process.poll() is None:
                 process.terminate()
                 try:
-                    process.wait(timeout=8)
+                    process.wait(timeout=20 if api_port else 8)
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait(timeout=5)
@@ -470,3 +498,264 @@ def test_simulator_runs_until_terminated(server, power_db, tmp_path):
     assert "simulator_stopped" in log_path.read_text()
     receiver.terminate()
     assert receiver.wait(timeout=8) == 0
+
+
+def test_history_paging_and_command_outbox_persistence(power_db, sample):
+    dsn, conn = power_db
+    receiver = PowerReceiver(
+        PowerValidator(frozenset({sample["device_id"]})), PowerStore(conn)
+    )
+    for sequence in range(3):
+        payload = {**sample, "sequence_no": sequence, "event_time": NOW.isoformat()}
+        receiver.handle(
+            TOPIC,
+            json.dumps(payload).encode(),
+            qos=1,
+            retain=False,
+            acknowledge=lambda: None,
+        )
+    api = ControlStore(dsn)
+    first = api.history(sample["device_id"], NOW, NOW + timedelta(days=1), 1)
+    assert len(first) == 2
+    after = (first[0]["event_time"], first[0]["boot_id"], first[0]["sequence_no"])
+    rest = api.history(sample["device_id"], NOW, NOW + timedelta(days=1), 2, after)
+    assert [row["sequence_no"] for row in rest] == [1, 2]
+
+    request = CommandRequest(command_id="persistent-1", operation="open_breaker")
+    original = api.create_command(sample["device_id"], "breaker-001", request)
+    assert api.create_command(sample["device_id"], "breaker-001", request) == original
+    with pytest.raises(CommandConflict):
+        api.create_command(
+            sample["device_id"],
+            "breaker-001",
+            request.model_copy(update={"operation": "close_breaker"}),
+        )
+    outbox = CommandOutbox(conn)
+    assert outbox.due() == [original["command"]]
+    assert outbox.due() == []
+    conn.execute("UPDATE device_commands SET next_attempt_at=now()")
+    # A new worker uses the same saved payload, timestamps and command ID.
+    assert CommandOutbox(conn).due() == [original["command"]]
+    conn.execute(
+        "UPDATE device_commands SET expires_at=now()-interval '1 second', "
+        "next_attempt_at=now()"
+    )
+    assert outbox.due() == []
+    assert (
+        api.get_command(sample["device_id"], request.command_id)["status"] == "unknown"
+    )
+    result = CommandResult(
+        schema_version="1.0",
+        message_type="command_result",
+        device_id=sample["device_id"],
+        equipment_id="breaker-001",
+        command_id=request.command_id,
+        status="completed",
+        reason="",
+        state_version=1,
+        breaker_state="open",
+        event_time=NOW,
+    )
+    assert not outbox.save_result(result.model_copy(update={"equipment_id": "wrong"}))
+    assert outbox.save_result(
+        result
+    )  # A late final result resolves an unknown outcome.
+    assert not outbox.save_result(result.model_copy(update={"status": "accepted"}))
+    assert (
+        api.get_command(sample["device_id"], request.command_id)["status"]
+        == "completed"
+    )
+
+
+@pytest.mark.parametrize("server", [True], indirect=True)
+def test_https_history_and_commands_through_real_mqtt_after_restart(
+    server, broker, power_db, sample
+):
+    process = server.start()
+    dsn, conn = power_db
+    send(broker, {**sample, "event_time": NOW.isoformat()})
+    base = f"https://127.0.0.1:{server.api_port}"
+    headers = {"Authorization": "Bearer " + "c" * 32}
+    path = f"/api/v1/devices/{sample['device_id']}"
+    completed = {}
+    received = []
+    subscribed = Event()
+    device = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+
+    def connected(client, userdata, flags, reason, properties):
+        client.subscribe(f"tmrp/devices/{sample['device_id']}/commands", qos=1)
+
+    def on_message(client, userdata, message):
+        command = json.loads(message.payload)
+        identity = command["command_id"]
+        received.append(command)
+        if identity not in completed:
+            completed[identity] = {
+                "schema_version": "1.0",
+                "message_type": "command_result",
+                "device_id": command["device_id"],
+                "equipment_id": command["equipment_id"],
+                "command_id": identity,
+                "status": "completed",
+                "reason": "",
+                "state_version": 1,
+                "breaker_state": "open",
+                "event_time": datetime.now(timezone.utc).isoformat(),
+            }
+        client.publish(
+            f"tmrp/devices/{sample['device_id']}/command-results",
+            json.dumps(completed[identity]),
+            qos=1,
+        )
+
+    device.on_connect = connected
+    device.on_subscribe = lambda *args: subscribed.set()
+    device.on_message = on_message
+    with httpx.Client(
+        base_url=base,
+        verify=ssl.create_default_context(cafile=str(server.certificate)),
+        trust_env=False,
+        timeout=5,
+    ) as api:
+        assert api.get("/api/v1/devices").status_code == 401
+        params = {
+            "start": NOW.isoformat(),
+            "end": (NOW + timedelta(days=1)).isoformat(),
+        }
+
+        def stored():
+            response = api.get(path + "/telemetry", params=params, headers=headers)
+            assert response.status_code == 200, response.text
+            return len(response.json()["items"]) == 1
+
+        eventually(stored)
+        request = {"command_id": "https-restart-1", "operation": "open_breaker"}
+        created = api.post(path + "/commands", json=request, headers=headers)
+        assert created.status_code == 202, created.text
+        original = created.json()["command"]
+        duplicate = api.post(path + "/commands", json=request, headers=headers)
+        assert duplicate.json()["command"] == original
+        assert (
+            api.post(
+                path + "/commands",
+                json={**request, "operation": "close_breaker"},
+                headers=headers,
+            ).status_code
+            == 409
+        )
+        process.terminate()
+        assert process.wait(timeout=20) == 0
+        server.start()
+        device.connect("127.0.0.1", broker.port)
+        device.loop_start()
+        try:
+            assert subscribed.wait(3)
+
+            def finished():
+                response = api.get(path + "/commands/https-restart-1", headers=headers)
+                assert response.status_code == 200, response.text
+                return response.json()["status"] == "completed"
+
+            eventually(finished)
+            assert received and all(command == original for command in received)
+            assert (
+                conn.execute("SELECT count(*) FROM device_commands").fetchone()[0] == 1
+            )
+            assert (
+                ControlStore(dsn).get_command(
+                    sample["device_id"], request["command_id"]
+                )["result"]["breaker_state"]
+                == "open"
+            )
+        finally:
+            device.disconnect()
+            device.loop_stop()
+
+
+@pytest.mark.parametrize("server", [True], indirect=True)
+def test_https_operates_real_qt_simulator(server, broker, power_db, tmp_path):
+    binary = ROOT / "device-simulator/build/tmrp-device-simulator"
+    if not binary.exists():
+        pytest.skip("Build the Qt simulator for the HTTPS-to-Qt end-to-end test")
+    server.start()
+    profile = tmp_path / "fleet.json"
+    device_settings = json.loads(
+        (ROOT / "device-simulator/config/fleet-tunnel.example.json").read_text()
+    )["devices"][0]
+    device_settings["port"] = broker.port
+    profile.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "devices": [device_settings],
+            }
+        )
+    )
+    prefix = ROOT / "device-simulator/.deps/qt/usr"
+    env = {**os.environ, "QT_QPA_PLATFORM": "offscreen"}
+    if prefix.exists():
+        env["LD_LIBRARY_PATH"] = (
+            f"{prefix}/lib/x86_64-linux-gnu:{prefix}/lib/x86_64-linux-gnu/libproxy"
+        )
+        env["QT_PLUGIN_PATH"] = f"{prefix}/lib/x86_64-linux-gnu/qt6/plugins"
+    with (tmp_path / "qt.log").open("wb") as log:
+        simulator = subprocess.Popen(
+            [
+                str(binary),
+                "--fleet",
+                str(profile),
+                "--state-dir",
+                str(tmp_path / "qt-state"),
+                "--headless",
+                "--auto-connect",
+                "--auto-send",
+            ],
+            env=env,
+            stdout=log,
+            stderr=log,
+        )
+        try:
+            with httpx.Client(
+                base_url=f"https://127.0.0.1:{server.api_port}",
+                verify=ssl.create_default_context(cafile=str(server.certificate)),
+                headers={"Authorization": "Bearer " + "c" * 32},
+                trust_env=False,
+                timeout=5,
+            ) as api:
+                store = ControlStore(power_db[0])
+
+                def telemetry_received():
+                    assert simulator.poll() is None, (tmp_path / "qt.log").read_text()
+                    return (
+                        power_db[1]
+                        .execute("SELECT count(*) FROM power_telemetry")
+                        .fetchone()[0]
+                        > 0
+                    )
+
+                eventually(telemetry_received)
+                path = "/api/v1/devices/power-meter-001/commands"
+                response = api.post(
+                    path, json={"command_id": "real-qt-1", "operation": "open_breaker"}
+                )
+                assert response.status_code == 202, response.text
+
+                def operated():
+                    result = api.get(path + "/real-qt-1")
+                    assert result.status_code == 200, result.text
+                    return result.json()["status"] == "completed"
+
+                eventually(operated)
+                assert (
+                    store.get_command("power-meter-001", "real-qt-1")["result"][
+                        "breaker_state"
+                    ]
+                    == "open"
+                )
+        finally:
+            simulator.terminate()
+            try:
+                simulator.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                simulator.kill()
+                simulator.wait(timeout=5)

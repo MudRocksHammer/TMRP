@@ -1,7 +1,8 @@
 # 電力遥測の受信サーバー
 
 2026-10-27。TMRP内に実装したMQTT→検証→PostgreSQLの常駐サーバー。
-デスクトップ配信・操作API・最新状態管理はまだ含まない。
+監視クライアント向けの履歴取得・模擬設備への操作指令は[HTTPS API](https-api.md)で提供する。
+リアルタイムのデスクトップ配信・最新状態管理はまだ含まない。
 
 まとめて起動するスクリプトと継続送信器は[起動・シミュレーター手順](power-simulator.md)を参照する。
 
@@ -79,7 +80,7 @@ Ctrl+C/SIGTERMでは処理中のトランザクションを終えて停止する
 1. TMRPを`/opt/tmrp`へ配置し、専用仮想環境を作る。
 2. 専用OSユーザーと設定ディレクトリを作る。
 3. 専用DB・ロールを用意し、管理用接続で`--init-db`を実行する。
-4. 実行用DBロールには対象スキーマのUSAGE、power_telemetryのSELECT/INSERT、power_telemetry_rejectionsのSELECT/INSERT、関連シーケンスのUSAGEを付与する。DDL権限は不要。
+4. 実行用DBロールには対象スキーマのUSAGE、power_telemetryのSELECT/INSERT、power_telemetry_rejectionsのSELECT/INSERT、関連シーケンスのUSAGEを付与する。HTTPS APIを有効にする場合はdevice_commandsのSELECT/INSERT/UPDATEも必要。DDL権限は不要。
 5. Brokerに受信用アカウントを作り、対象Topicの購読だけ許可する。送信機器にも固有の資格情報と、自身のTopicへのpublish権限を与える。
 6. 設定、台帳、秘密情報、必要な証明書を配置し、設定検査後にsystemdを起動する。
 
