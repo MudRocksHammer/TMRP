@@ -87,6 +87,7 @@ if ($args -contains '-requires') {
     try { Invoke-Checked $shell @('-NoProfile', '-Command', 'exit 23') }
     catch { $failed = $_.Exception.Message -match 'exit 23' }
     Assert-True $failed 'A native tool error must stop setup and preserve its exit code.'
+    $global:LASTEXITCODE = 0
     Write-Host 'PASS: PowerShell syntax, VS 2022/2026 selection, Qt kit validation and native failure handling.'
 } finally {
     if (Test-Path $temporary) { Remove-Item -Recurse -Force $temporary }
