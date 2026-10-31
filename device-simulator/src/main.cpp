@@ -4,11 +4,30 @@
 #include <QCommandLineParser>
 #include <QDir>
 #include <QFontDatabase>
+#include <QPalette>
 #include <QStandardPaths>
 #include <algorithm>
 
 int main(int argc, char **argv) {
     QApplication app(argc, argv);
+    // The UI uses light surfaces; do not inherit white text from a dark OS theme.
+    app.setStyle("Fusion");
+    QPalette palette;
+    palette.setColor(QPalette::Window, QColor("#f2f5fa"));
+    palette.setColor(QPalette::WindowText, QColor("#183b50"));
+    palette.setColor(QPalette::Base, Qt::white);
+    palette.setColor(QPalette::AlternateBase, QColor("#edf2f7"));
+    palette.setColor(QPalette::Text, QColor("#183b50"));
+    palette.setColor(QPalette::Button, QColor("#f5f7fa"));
+    palette.setColor(QPalette::ButtonText, QColor("#183b50"));
+    palette.setColor(QPalette::ToolTipBase, QColor("#fff8df"));
+    palette.setColor(QPalette::ToolTipText, QColor("#183b50"));
+    palette.setColor(QPalette::Highlight, QColor("#087e8b"));
+    palette.setColor(QPalette::HighlightedText, Qt::white);
+    palette.setColor(QPalette::PlaceholderText, QColor("#63758a"));
+    for (auto role : {QPalette::WindowText, QPalette::Text, QPalette::ButtonText})
+        palette.setColor(QPalette::Disabled, role, QColor("#63758a"));
+    app.setPalette(palette);
     app.setOrganizationName("TMRP");
     app.setApplicationName("DeviceSimulator");
     app.setApplicationVersion("0.1.0");
