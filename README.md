@@ -1,208 +1,100 @@
 # TMRP
 
-### Telemetry Monitoring and Replay Platform
+鉱区の電力設備から送られる遥測データを受信し、PostgreSQLへ保存するシステム。
+C++/Qtの模擬設備アプリで、データ送信と遮断器の開閉指令を試験できる。
 
-**TMRP is an IoT telemetry platform for collecting, validating, storing, analyzing and replaying device telemetry data.**
-**The project uses C++ for device simulation and Python for telemetry collection, validation, analytics, alarm processing and replay.**
+## 機能
 
-## Project Status
+- **受信サーバー**：MQTTの電力データを検証し、機器台帳と照合して保存する。重複を除外し、不正データの拒否理由を記録する。DBへのコミット後にMQTT ACKを返す。
+- **運転監視**：受信・保存結果のログ、HTTPヘルスチェック、MQTT再接続、systemd用サービス定義。
+- **模擬設備アプリ**：複数設備の追加・設定、周期送信、測定値の変更、開閉指令の受信・応答、設備状態と指令履歴の保存。
+- **試験用ツール**：12台の電力計を模擬する継続送信器、指令送信器、受信サーバーの性能測定。
+- **分析ツール**：TelemetryのJSON検証、時系列集計・グラフ、低バッテリー判定、CSV／Excel出力。
 
-### This project is under active development.
+```text
+模擬設備 → Mosquitto → 受信サーバー → PostgreSQL
+指令送信スクリプト → Mosquitto → 模擬設備 → 操作結果
+```
 
-#### Current implementations:
+## 使用技術
 
-- Telemetry message data model
-- Runtime validation
-- JSON serialization and deserialization
-- JSON Lines telemetry reader
-- Command-line interface
-- JSON application configuration loading and validation
-- Configurable JSON logging with Loguru for telemetry validation
-- Sample telemetry analysis with NumPy, Pandas, and a reproducible Notebook
-- Battery trend plots, time-based summaries, and UTC/Japan time zone comparison
-- Local MQTT publisher and subscriber with topic and payload validation
-- PostgreSQL storage with duplicate skipping and transactional batch inserts
-- MQTT receive buffering and flushing on Ctrl+C
-- Per-device low-battery alerts with recovery events and reproducible CSV reports
-- Asyncio telemetry pipeline prototype with bounded queues and simulated-wait benchmarks
-- Async PostgreSQL storage with count- and time-based batch flushing and task cancellation tests
-- Async MQTT collection with a receive limit, validation, and PostgreSQL batch storage
-- Unit and database integration tests
-- Static type checking
+| 対象 | 技術 |
+|---|---|
+| 受信サーバー | Python 3.12以上、Paho MQTT、Psycopg 3、Loguru |
+| 通信・DB | MQTT 3.1.1／QoS 1、Mosquitto、PostgreSQL／JSONB |
+| 模擬設備 | C++17、Qt 6 Widgets、libmosquitto、SQLite |
+| 分析・非同期処理 | NumPy、Pandas、Matplotlib、openpyxl、asyncio、aiomqtt |
+| ビルド・検査 | CMake、vcpkg、QtTest、pytest、Ruff、mypy |
 
-#### Planned implementations:
+## 起動手順
 
-- Durable MQTT collection with recovery and retry handling
-- Extended telemetry analytics
-- MQTT-connected alarms and persistent alert state
-- Telemetry replay
-- C++ device simulator
-- Docker compose
-
-## Requirements
-
-- Python 3.12 or later
-- Git
-- Linux or WSL
-
-### Local MQTT examples also require:
-
-- Mosquitto 2.x or later and Mosquitto clients
-- PostgreSQL (verified with version 16) and the telemetry schema
-
-### Future components may require:
-
-- C++ 17 compiler
-- CMake
-- Docker
-
-## Setup
-
-#### Clone repository
+### 1. サーバーの準備（Ubuntu 24.04）
 
 ```bash
-# TMRPリポジトリをローカル環境へ複製する
+# Python、PostgreSQL、MQTTと確認用コマンドを導入する
+sudo apt update
+sudo apt install python3-venv postgresql postgresql-client mosquitto mosquitto-clients git curl
+
+# ソースを取得する（取得済みの場合は既存のTMRPへ移動する）
 git clone https://github.com/MudRocksHammer/TMRP.git
-
-# 複製したTMRPディレクトリへ移動する
 cd TMRP
-```
 
-#### Create virtual environment
-
-```bash
-# Pythonのバージョンを確認する
-python3 --version
-
-# プロジェクト専用の仮想環境を作る
+# Python環境を作成し、依存関係を導入する
 python3 -m venv .venv
+.venv/bin/python -m pip install -e '.[dev]'
 
-# このターミナルで仮想環境を有効にする
-source .venv/bin/activate
+# PostgreSQLを起動する
+sudo systemctl start postgresql
+
+# 現在のOSユーザー用のDBロールと開発DBを作成する（初回のみ）
+sudo -u postgres createuser "$(id -un)"
+sudo -u postgres createdb --owner="$(id -un)" tmrp_dev
 ```
 
-#### Install the project and development dependencies
+既存のDBロール・`tmrp_dev`がある場合は作成を省略する。以降のコマンドはTMRPルートで実行する。
+
+### 2. Brokerと受信サーバーを起動する
+
+端末1：
 
 ```bash
-# 本体と開発用依存関係を編集可能モードでインストールする
-python -m pip install -e ".[dev]"
+# 開発用MQTT Brokerを18884番で起動する
+mosquitto -p 18884
 ```
 
-#### Verify the installation
+端末2：
 
 ```bash
-# インストールしたCLIのバージョンを確認する
-tmrp --version
+# ローカルPostgreSQLの接続先を指定する
+export TMRP_RECEIVER_DSN="host=/var/run/postgresql dbname=tmrp_dev user=$(id -un)"
+
+# 必要なテーブルを作成し、受信サーバーを起動する
+bash scripts/server/start_server.sh --init-db
 ```
 
-#### Verify format, type checking, tests
+Broker接続先は`examples/power/receiver-local.toml`、設備台帳は`examples/power/assets.json`で設定する。
+既定値はBroker `127.0.0.1:18884`、ヘルスチェック `127.0.0.1:8081`。
+
+### 3. データを送信して保存を確認する
+
+端末3：
 
 ```bash
-# 自動整形、コード規約、型、テストの検査を実行する
-bash scripts/dev/check_test.sh
+# 12台から各1秒に1件ずつ送信する。Ctrl+Cで停止する
+.venv/bin/python scripts/mqtt/simulate_power.py --rate-hz 1
 ```
 
-## Usage
-
-Run these commands from the TMRP directory with the virtual environment activated.
-
-#### Validate a telemetry JSON file:
+端末4：
 
 ```bash
-# 正常なTelemetry JSONを検証する
-tmrp validate examples/telemetry/valid.json
+# 受信サーバーの準備状態と処理件数を確認する
+curl --fail http://127.0.0.1:8081/health/ready
+
+# 機器別のDB保存件数を確認する
+psql "host=/var/run/postgresql dbname=tmrp_dev user=$(id -un)" \
+  -c 'SELECT device_id, count(*) FROM power_telemetry GROUP BY device_id ORDER BY device_id;'
 ```
 
-#### Check an application configuration file:
-
-```bash
-# 設定ファイルを検証し、実行環境とログレベルを表示する
-tmrp check-config examples/config/valid.json
-```
-
-#### Validate telemetry with configured JSON logging:
-
-```bash
-# 設定のログレベルを適用してTelemetryを検証する
-# 検証結果は標準出力、JSONログは標準エラーへ出る
-tmrp validate examples/telemetry/valid.json --config examples/config/valid.json
-```
-
-`check-config` validates and displays settings. `validate --config` applies the
-configured log level. Omitting `--config` preserves the plain-text CLI behavior.
-See [configuration instructions](docs/reference/configuration.md) for fields, defaults,
-log format, expected output, and exit codes.
-
-See [telemetry analysis instructions](docs/guides/analysis.md) for analysis setup,
-execution steps, plots, CSV reports, and expected results.
-
-See [MQTT instructions](docs/guides/mqtt.md) for local broker setup, two-device publishing,
-input validation, batch storage, and shutdown steps.
-
-See [async MQTT instructions](docs/guides/async-mqtt.md) for receiving 10 messages,
-storing them through the async pipeline, and automatic shutdown.
-
-See [PostgreSQL storage instructions](docs/guides/storage.md) for database setup, schema,
-duplicate handling, transaction behavior, and database tests.
-
-See [battery alert instructions](docs/guides/alerts.md) for thresholds, state transitions,
-CSV report reproduction, and automated tests.
-
-See [asyncio pipeline instructions](docs/guides/async-pipeline.md) for queue behavior,
-async PostgreSQL batch storage, failure and cancellation tests, the three-mode pipeline benchmark,
-and four-mode database storage measurements with CSV and Excel reports.
-
-## Project layout
-
-Application code and tests are grouped by feature; scripts are grouped by purpose.
-See the [project structure](docs/development/project-structure.md) for file locations
-and the [documentation index](docs/README.md) for specifications and guides.
-
-## Development checks
-
-```bash
-# 書式を自動修正し、lint・型チェック・テストを実行する
-bash scripts/dev/check_test.sh
-
-# ローカルPostgreSQLを含めて同じ検査を実行する
-bash scripts/dev/check_test.sh --db
-```
-
-Uses Ruff, mypy, and pytest. `--db` uses the local learning database. Without it,
-database tests run only when `TMRP_TEST_DSN` is set to a non-empty value; see
-[database test instructions](docs/guides/storage.md#dbテストと品質チェック).
-See [verification instructions](docs/development/verification.md) for detailed checks.
-
-## Testing Strategy
-
-### The project uses the following test layers:
-
-- Unit tests for telemetry validation
-- Serialization and deserialization tests
-- JSON Lines stream tests
-- CLI tests
-- MQTT topic and payload validation tests (without a broker)
-- Collector unit tests for buffering, validation failures, database errors, and shutdown
-- PostgreSQL integration tests for storage and collector batching, duplicates, and rollback
-- Battery state transitions, per-device alert events, and CSV report integration tests
-- Asyncio queue backpressure, shutdown, consumer failure, and cancellation tests
-- Async MQTT receive limits, producer and DB pipeline tests, and database integration
-- Configuration validation and file-loading tests
-- JSON log formatting, level filtering, and repeated logging setup tests
-
-#### Future tests layers:
-
-- MQTT integration tests
-- End-to-end telemetry pipeline tests
-- Replay reproducibility tests
-- Performance tests
-
-## Design Principles
-
-- C++ handles device-side and performance-sensitive processing
-- Python handles collection, validation, analytics, testing and automation
-- External input is validated before creating domain objects
-- Internal timestamps are timezone-aware
-- JSON timestamps are normalized to UTC
-- Domain logic is separated from CLI and infrastructure code
-- Tests, linting and type checking are treated as build gates
+GUIから送信・操作する場合は[模擬設備アプリの起動手順](device-simulator/README.md)を使う。
+WindowsからUbuntu VMへ接続する方法は[VM接続ガイド](docs/guides/qt-simulator-vm.md)、
+systemdでの常駐起動は[サーバー配備手順](docs/guides/power-receiver.md#linuxサーバーへの配備)を参照。
