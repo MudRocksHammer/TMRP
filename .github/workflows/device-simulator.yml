@@ -12,6 +12,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - shell: pwsh
+        run: ./device-simulator/tests/test_windows_setup.ps1
       - run: sudo apt-get update && sudo apt-get install -y qt6-base-dev libqt6sql6-sqlite libmosquitto-dev
       - run: cmake -S device-simulator -B device-simulator/build -DCMAKE_BUILD_TYPE=Debug
       - run: cmake --build device-simulator/build --parallel 2
@@ -20,6 +22,9 @@ jobs:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
+      - name: Check scripts with Windows PowerShell 5.1
+        shell: powershell
+        run: ./device-simulator/tests/test_windows_setup.ps1
       - uses: jurplel/install-qt-action@v4
         with:
           version: '6.8.3'
@@ -27,7 +32,8 @@ jobs:
           cache: true
       - shell: pwsh
         run: |
-          & ./device-simulator/scripts/build-windows.ps1 -QtPrefix $env:QT_ROOT_DIR -VcpkgRoot $env:VCPKG_INSTALLATION_ROOT
+          & ./device-simulator/tests/test_windows_setup.ps1
+          & ./device-simulator/scripts/setup-windows.ps1 -QtPrefix $env:QT_ROOT_DIR -VcpkgRoot $env:VCPKG_INSTALLATION_ROOT -InstallRoot "$env:RUNNER_TEMP/tmrp-toolchains"
       - uses: actions/upload-artifact@v4
         with:
           name: device-simulator-windows-x64

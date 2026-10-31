@@ -45,10 +45,87 @@ ctest --test-dir device-simulator/build --output-on-failure
 
 ## Windowsでビルド・起動
 
-1. Visual Studio 2022の「C++によるデスクトップ開発」とWindows SDK、CMake、Gitを用意する。
+### 自動セットアップ
+
+Windows x64の通常のPowerShellから実行できる。Windows側へ最新の`device-simulator`をコピーしておく。
+初回はネット接続と、インストーラーが要求する管理者権限（UAC）が必要。
+`winget`がない場合はMicrosoftの「アプリ インストーラー」を導入・更新してから実行する。
+
+```powershell
+# Windows側のTMRPへ移動する（実際の保存先に変更する）
+cd C:\dev\TMRP
+# セットアップ・ビルド・テスト・DLL配置を実施し、成功後にアプリを開く
+# ExecutionPolicyはこのPowerShellプロセスだけに適用する
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\device-simulator\scripts\setup-windows.ps1 -Launch
+```
+
+スクリプトはGit、Visual Studio 2022／2026のC++ツール、CMakeを確認する。
+既存のVS Community／Professional／Enterprise／Build Toolsから、C++機能がある新しいバージョンを優先する。
+VS自体がない場合はVS 2022 Build Toolsをwingetで導入する。VSがあるのにC++機能がない場合は、
+別のVSを追加せず「Visual Studio Installer → 変更 → C++によるデスクトップ開発」の追加を案内して停止する。
+Git・対応CMakeの不足分もwingetで導入する。
+Qtがない場合はPythonと専用venvのaqtinstall 3.3.0を使い、Qt 6.8.3のMSVC x64キットを取得する。
+vcpkgを取得・初期化し、MosquittoなどのC++依存関係はCMake設定時に導入する。
+Qt Creatorは導入しない。Qtのバージョンは`-QtVersion`で指定できる（MSVC 2022 x64キットが必要）。
+wingetのソース・パッケージ規約への同意オプションを使う。Qtの取得は第三者ツールaqtinstallを経由する。
+
+既定の保存先は`%LOCALAPPDATA%\TMRP\toolchains`。`-InstallRoot C:\dev\tmrp-tools`で変更できる。
+既存のQtは`QT_ROOT_DIR`、`C:\Qt\<バージョン>\msvc2022_64`、保存先の順で探す。
+既存vcpkgは`VCPKG_ROOT`または`VCPKG_INSTALLATION_ROOT`からも取得する。
+独自の場所へ導入済みの場合は明示する。
+
+```powershell
+# 既存のQtとvcpkgを使う
+& .\device-simulator\scripts\setup-windows.ps1 `
+  -QtPrefix C:\Qt\6.8.3\msvc2022_64 -VcpkgRoot C:\dev\vcpkg -Launch
+# 環境の準備だけ行う（アプリのビルド・C++依存関係の導入は後で行う）
+& .\device-simulator\scripts\setup-windows.ps1 -SetupOnly
+# 2回目以降は保存されたパスでビルド・テストする
+& .\device-simulator\scripts\build-windows.ps1
+# アプリを起動する
+& .\device-simulator\build-windows\Release\tmrp-device-simulator.exe
+```
+
+**Visual Studio 2026 Communityを使う場合**は、InstallerでMSVC x64/x86ビルドツール、Windows SDK、
+C++ CMakeツールを含む「C++によるデスクトップ開発」を導入してから、同じセットアップコマンドを実行する。
+VS 2026ではCMake 4.2以降と`Visual Studio 18 2026`を使用し、
+出力先は`build-windows-vs2026\Release\tmrp-device-simulator.exe`になる。
+VS 2022の既存ビルドキャッシュはそのまま残す。`-Launch`は選択したVSの出力を起動する。
+直接ビルドするときも保存したVSのパスを使い、`-VisualStudioPath`で変更できる。
+
+Qtキット名の`msvc2022_64`はQtのビルドに使われたコンパイラーを示し、IDEを必ず2022にする意味ではない。
+VS 2026との組合せは[MicrosoftのMSVCバイナリ互換性](https://learn.microsoft.com/en-us/cpp/porting/binary-compat-2015-2017?view=msvc-170)
+を根拠に利用する構成。ただしQt 6.8の公式対応表はMSVC 2022であり、VS 2026での本アプリの実ビルドは未検証。
+CMake要件は[公式VS 2026 generator資料](https://cmake.org/cmake/help/latest/generator/Visual%20Studio%2018%202026.html)を参照。
+古いvcpkgでVS 2026を認識できない場合は、最新のvcpkgを別フォルダーへ取得して`-VcpkgRoot`で指定する。
+
+使用したパスは`.deps/windows-toolchain.json`へ保存し、Gitには含めない。
+スクリプト自身は永続PATHやシステムの実行ポリシーを変更しない。各ツールのインストーラーがPATHを追加する場合はある。
+既存のvcpkgを勝手に更新せず、失敗したコマンドでは処理を止める。
+再起動が必要と表示された場合はWindowsを再起動して同じコマンドを実行する。
+既存のQt/vcpkgが正常なら再利用する。通信失敗や不完全なインストールが残った場合は、表示された対象を修復して再実行する。
+
+`Saved local build settings`の後に`UnexpectedToken`や「文字列の終端がない」が出て日本語も文字化けする場合は、
+古い`build-windows.ps1`のUTF-8がWindows PowerShell 5.1で誤読されている可能性がある。
+現行のWindows用スクリプトはコメント・メッセージもASCIIへ統一した。
+修正版の`build-windows.ps1`をコピーし、保存済み設定を使ってビルドだけ再実行する。
+
+```powershell
+# セットアップ済みの環境で、ビルドから再開する
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\device-simulator\scripts\build-windows.ps1
+```
+
+セットアップ補助関数はPowerShell上でテスト済み。Windowsでの初回インストール全体は未検証。
+GitHub ActionsのWindowsジョブでは導入済みQt/vcpkgを使う経路を検証する構成にしている。
+参考：[MicrosoftのVS自動導入](https://learn.microsoft.com/en-us/visualstudio/install/use-command-line-parameters-to-install-visual-studio?view=vs-2022)、
+[aqtinstallのコマンド](https://aqtinstall.readthedocs.io/en/latest/cli.html)。
+
+### 手動で準備する場合
+
+1. Visual Studio 2022または2026の「C++によるデスクトップ開発」とWindows SDK、CMake、Gitを用意する。VS 2026はCMake 4.2以降が必要。
 2. Qt 6.4以降の**MSVC 2022 64-bit**キットを導入する。下記はQt 6.8.3のパス例。
 3. vcpkgを準備する。MinGW版QtとMSVCライブラリを混在させない。
-4. **Developer PowerShell for VS 2022**でTMRPルートへ移動して実行する。
+4. 使用するVSの**Developer PowerShell**でTMRPルートへ移動して実行する。下記のexeパスはVS 2022の場合。
 
 ```powershell
 # vcpkgをまだ用意していない場合。既存の導入先があればそれを使う

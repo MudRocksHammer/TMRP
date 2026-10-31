@@ -1,32 +1,61 @@
 param(
-    [Parameter(Mandatory=$true)][string]$QtPrefix,
-    [Parameter(Mandatory=$true)][string]$VcpkgRoot,
+    [string]$QtPrefix,
+    [string]$VcpkgRoot,
+    [string]$VisualStudioPath,
     [ValidateSet("Debug", "Release")][string]$Configuration = "Release"
 )
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot 'windows-toolchain.ps1')
 $simulatorRoot = Split-Path $PSScriptRoot -Parent
-$buildDirectory = Join-Path $simulatorRoot "build-windows"
+$settingsPath = Join-Path $simulatorRoot '.deps/windows-toolchain.json'
+if (Test-Path $settingsPath) {
+    $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json
+    if (!$QtPrefix) { $QtPrefix = $settings.QtPrefix }
+    if (!$VcpkgRoot) { $VcpkgRoot = $settings.VcpkgRoot }
+    if (!$VisualStudioPath) { $VisualStudioPath = $settings.VisualStudioPath }
+    if ($settings.CmakeBin) { $env:PATH = "$($settings.CmakeBin);$env:PATH" }
+}
+if (!$QtPrefix -or !$VcpkgRoot) {
+    throw 'Run setup-windows.ps1 first, or specify -QtPrefix and -VcpkgRoot.'
+}
+$vs = Find-VisualStudio -InstallationPath $VisualStudioPath
+if (!$vs) { throw 'VS 2022/2026 C++ tools not found. Run setup-windows.ps1 after installing the C++ workload.' }
+$cmake = Find-CompatibleCMake $vs
+if (!$cmake) { throw "CMake $($vs.MinimumCmake) or newer is required. Run setup-windows.ps1." }
+$buildDirectory = Join-Path $simulatorRoot $vs.BuildFolder
 $toolchain = Join-Path $VcpkgRoot "scripts/buildsystems/vcpkg.cmake"
 if (!(Test-Path $toolchain) -or !(Test-Path (Join-Path $QtPrefix "bin/windeployqt.exe"))) {
-    throw "Qt (MSVC 2022 x64) と vcpkg のパスを確認してください。"
+    throw 'Check the paths to the Qt MSVC x64 kit and vcpkg.'
 }
-# MSVC x64、Qt、vcpkgの依存ライブラリを同じ構成で使用する
-cmake -S $simulatorRoot -B $buildDirectory -G "Visual Studio 17 2022" -A x64 `
-    "-DCMAKE_PREFIX_PATH=$QtPrefix" "-DCMAKE_TOOLCHAIN_FILE=$toolchain" `
-    -DVCPKG_TARGET_TRIPLET=x64-windows
-if ($LASTEXITCODE -ne 0) { throw "CMake configure failed" }
-cmake --build $buildDirectory --config $Configuration --parallel 2
-if ($LASTEXITCODE -ne 0) { throw "C++ build failed" }
-$env:PATH = "$(Join-Path $QtPrefix 'bin');$env:PATH"
-$env:QT_PLUGIN_PATH = Join-Path $QtPrefix "plugins"
-$env:QT_QPA_PLATFORM = "offscreen"
-# QtTestを実行する。vcpkgがMQTT/OpenSSL DLLをビルド先へ配置する
-ctest --test-dir $buildDirectory -C $Configuration --output-on-failure
-if ($LASTEXITCODE -ne 0) { throw "Tests failed" }
-Remove-Item Env:QT_QPA_PLATFORM
-$app = Join-Path $buildDirectory "$Configuration/tmrp-device-simulator.exe"
-$deployMode = if ($Configuration -eq "Debug") { "--debug" } else { "--release" }
-# Qt DLL・platforms・SQLite等のQtプラグインを実行ファイルの横へ配置する
-& (Join-Path $QtPrefix "bin/windeployqt.exe") $deployMode --compiler-runtime $app
-if ($LASTEXITCODE -ne 0) { throw "Qt deployment failed" }
-Write-Host "Built: $app"
+$previousPath = $env:PATH
+$previousPlugins = $env:QT_PLUGIN_PATH
+$previousPlatform = $env:QT_QPA_PLATFORM
+$previousVS = $env:VCPKG_VISUAL_STUDIO_PATH
+try {
+    $env:PATH = "$(Split-Path $cmake -Parent);$(Join-Path $QtPrefix 'bin');$env:PATH"
+    $env:VCPKG_VISUAL_STUDIO_PATH = $vs.Path
+    # Use the same Visual Studio instance for the app and vcpkg dependencies.
+    & $cmake -S $simulatorRoot -B $buildDirectory -G $vs.Generator -A x64 `
+        "-DCMAKE_GENERATOR_INSTANCE=$($vs.Path)" `
+        "-DCMAKE_PREFIX_PATH=$QtPrefix" "-DCMAKE_TOOLCHAIN_FILE=$toolchain" `
+        -DVCPKG_TARGET_TRIPLET=x64-windows
+    if ($LASTEXITCODE -ne 0) { throw "CMake configure failed" }
+    & $cmake --build $buildDirectory --config $Configuration --parallel 2
+    if ($LASTEXITCODE -ne 0) { throw "C++ build failed" }
+    $env:QT_PLUGIN_PATH = Join-Path $QtPrefix "plugins"
+    $env:QT_QPA_PLATFORM = "offscreen"
+    # Run QtTest; vcpkg deploys the MQTT/OpenSSL DLLs alongside each executable.
+    ctest --test-dir $buildDirectory -C $Configuration --output-on-failure
+    if ($LASTEXITCODE -ne 0) { throw "Tests failed" }
+    $app = Join-Path $buildDirectory "$Configuration/tmrp-device-simulator.exe"
+    $deployMode = if ($Configuration -eq "Debug") { "--debug" } else { "--release" }
+    # Deploy Qt DLLs and platform/SQLite plugins alongside the executable.
+    & (Join-Path $QtPrefix "bin/windeployqt.exe") $deployMode --compiler-runtime $app
+    if ($LASTEXITCODE -ne 0) { throw "Qt deployment failed" }
+    Write-Host "Built: $app"
+} finally {
+    $env:PATH = $previousPath
+    $env:QT_PLUGIN_PATH = $previousPlugins
+    $env:QT_QPA_PLATFORM = $previousPlatform
+    $env:VCPKG_VISUAL_STUDIO_PATH = $previousVS
+}

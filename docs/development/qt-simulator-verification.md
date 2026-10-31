@@ -47,3 +47,26 @@ export TMRP_TEST_DSN='host=/var/run/postgresql dbname=tmrp_dev user=shou'
 統合試験にはMosquitto、OpenSSL、起動済みPostgreSQLとプロジェクトのPython依存関係が必要。
 WindowsからVMへ渡る実際のネットワーク経路、および64台・各50Hzの負荷は今回の合格範囲に含めない。
 Windows側での確認は[VM接続ガイド](../guides/qt-simulator-vm.md)に従う。
+
+## Windows自動セットアップの追加検証（2026-10-31）
+
+`scripts/setup-windows.ps1`を追加し、既存の`build-windows.ps1`でローカル設定を読み込めるようにした。
+Linux上のPowerShell 7.4.6で`tests/test_windows_setup.ps1`を実行し、次を確認した。
+
+- PowerShellスクリプトの構文解析。
+- VS 2022／2026のgenerator選択、2026でのCMake 4.2要件、VS別のビルド出力先、未対応バージョンの拒否。
+- Qtキットの不足ファイル、MSVCライブラリ欠如、ARM64の拒否、およびMSVC x64相当のfixtureの受理。
+- 外部コマンドの成功と、非ゼロ終了コードを伴う例外による停止。
+
+```powershell
+# インストールやネット接続を伴わず、セットアップ補助処理をテストする
+pwsh -NoProfile -File device-simulator/tests/test_windows_setup.ps1
+```
+
+Windowsでのwinget・UAC・初回ダウンロード・C++ビルド全体はこの環境では実行していない。
+VS 2026の検出・生成方式を追加したが、VS 2026実機でのコンパイル・DLL配置は未検証。
+文字化けによる解析エラーの報告を受け、旧スクリプトのUTF-8本文を.NETのCP936としてデコードした場合に、
+`UnexpectedToken`、`TerminatorExpectedAtEndOfString`、`MissingEndCurlyBrace`を再現した。
+Windows用スクリプトをASCIIへ統一し、CP936／CP1252で読み取った場合の構文解析を回帰テストへ追加した。
+実行済みテストはLinux上のPowerShell 7。Windows PowerShell 5.1での検査もCIへ追加したが、CIは今回未実行。
+Windows CIはセットアップスクリプト経由で導入済みQt/vcpkgを使う構成へ変更したが、今回の作業中にCIは実行していない。
