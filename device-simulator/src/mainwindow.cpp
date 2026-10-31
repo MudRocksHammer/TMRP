@@ -343,8 +343,14 @@ void MainWindow::createUi() {
                   "background:#eff2f5; }"
                   "QPushButton#connectButton, QPushButton#startSending { background:#087e8b; "
                   "color:white; border:0; }"
-                  "QLineEdit,QDoubleSpinBox,QSpinBox,QComboBox { padding:4px; min-height:22px; }"
-                  "QTableWidget,QPlainTextEdit { background:#fff; border:1px solid #ced8e3; }"
+                  "QLineEdit,QDoubleSpinBox,QSpinBox,QComboBox { padding:4px; min-height:22px; "
+                  "background:#fff; color:#183b50; selection-background-color:#087e8b; "
+                  "selection-color:#fff; }"
+                  "QLineEdit:disabled,QDoubleSpinBox:disabled,QSpinBox:disabled,QComboBox:disabled "
+                  "{ background:#eff2f5; color:#63758a; }"
+                  "QTableWidget,QPlainTextEdit { background:#fff; color:#183b50; "
+                  "selection-background-color:#087e8b; selection-color:#fff; "
+                  "border:1px solid #ced8e3; }"
                   "QLabel#notice { color:#854b14; padding:5px; }");
 }
 

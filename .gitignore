@@ -27,6 +27,7 @@ dist/
 #IDE
 .vscode/
 .idea/
+.vs/
 
 #Operating system
 .DS_Store
