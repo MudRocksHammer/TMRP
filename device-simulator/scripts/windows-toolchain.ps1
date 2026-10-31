@@ -1,7 +1,8 @@
 # Shared detection for setup and direct builds; no installation side effects.
 function ConvertTo-VSToolchain {
     param($Instance)
-    $major = ([version]$Instance.installationVersion).Major
+    $installationVersion = @($Instance.installationVersion)[0]
+    $major = ([version]$installationVersion).Major
     switch ($major) {
         17 { $generator = 'Visual Studio 17 2022'; $minimum = '3.21'; $folder = 'build-windows' }
         18 { $generator = 'Visual Studio 18 2026'; $minimum = '4.2'; $folder = 'build-windows-vs2026' }
@@ -38,7 +39,9 @@ function Find-VisualStudio {
     if ($InstallationPath) {
         $instances = @($instances | Where-Object { $_.installationPath -eq $InstallationPath })
     }
-    $chosen = $instances | Sort-Object { [version]$_.installationVersion } -Descending |
+    $chosen = $instances | Sort-Object {
+        [version](@($_.installationVersion)[0])
+    } -Descending |
         Select-Object -First 1
     if ($chosen) { return ConvertTo-VSToolchain $chosen }
     return $null

@@ -33,9 +33,9 @@ try {
     @'
 $global:LASTEXITCODE = 0
 if ($args -contains '-requires') {
-    '[{"installationVersion":"17.14.0","installationPath":"C:\\VS2022"},{"installationVersion":"18.0.0","installationPath":"C:\\VS2026 Community"}]'
+    '[{"installationVersion":["17.14.0"],"installationPath":"C:\\VS2022"},{"installationVersion":["18.0.0"],"installationPath":"C:\\VS2026 Community"}]'
 } else {
-    '[{"installationVersion":"18.1.0","installationPath":"C:\\VS2026 Without Cpp"}]'
+    '[{"installationVersion":["18.1.0"],"installationPath":"C:\\VS2026 Without Cpp"}]'
 }
 '@ | Set-Content $fakeLocator
     $detected = Find-VisualStudio -VsWherePath $fakeLocator
