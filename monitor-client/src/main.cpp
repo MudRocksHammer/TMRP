@@ -1,5 +1,6 @@
 #include "diagram.h"
 #include "telemetrystream.h"
+#include "serverprotocol.h"
 #include <QApplication>
 #include <QDateTime>
 #include <QFileDialog>
@@ -117,9 +118,15 @@ int main(int argc, char **argv) {
     auto *root = new QWidget;
     auto *layout = new QVBoxLayout(root);
     auto *connection = new QHBoxLayout;
-    auto *url = new QLineEdit(settings.value("gateway", "http://127.0.0.1:8081").toString());
+    if (!ServerProtocol::loadCaFile(qEnvironmentVariable("TMRP_MONITOR_CA_FILE"))) {
+        QMessageBox::critical(&window, QStringLiteral("CA certificate"),
+                              QStringLiteral("Cannot read TMRP_MONITOR_CA_FILE."));
+        return 2;
+    }
+    auto *url = new QLineEdit(settings.value("api_server", "https://192.168.237.128:8443").toString());
     url->setAccessibleName(QStringLiteral("服务器监控网关地址"));
-    auto *token = new QLineEdit(qEnvironmentVariable("TMRP_MONITOR_TOKEN"));
+    auto *token = new QLineEdit(qEnvironmentVariable("TMRP_API_CONTROL_TOKEN",
+                                               qEnvironmentVariable("TMRP_API_READ_TOKEN")));
     token->setEchoMode(QLineEdit::Password);
     token->setPlaceholderText(QStringLiteral("访问令牌（不保存）"));
     token->setAccessibleName(QStringLiteral("服务器访问令牌"));
@@ -173,7 +180,7 @@ int main(int argc, char **argv) {
     QMap<QString, Pending> pending;
     QNetworkAccessManager network;
     TelemetryStream stream;
-    bool receiving = false, connected = false;
+    bool receiving = false, connected = false, controlAllowed = false;
     qint64 lastSnapshot = 0;
     QUrl base;
     QByteArray credential;
@@ -207,20 +214,15 @@ int main(int argc, char **argv) {
     };
     auto offline = [&] {
         connected = false;
+        controlAllowed = false;
+        diagram->controlEnabled = false;
         for (auto *item : diagram->equipment) { item->online = false; item->update(); }
         render();
     };
-    auto request = [&](QString path) {
-        QUrl target = base; target.setPath(path);
-        QNetworkRequest r(target);
-        r.setRawHeader("Authorization", "Bearer " + credential);
-        r.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-        r.setTransferTimeout(4000);
-        r.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
-        return r;
-    };
     QObject::connect(&stream, &TelemetryStream::snapshotReceived, &window, [&](const QJsonObject &snapshot) {
         connected = true; lastSnapshot = QDateTime::currentMSecsSinceEpoch();
+        controlAllowed = snapshot["control_allowed"].toBool();
+        diagram->controlEnabled = controlAllowed;
         for (auto *item : diagram->equipment) {
             item->online = false;
             for (const auto &entry : snapshot["devices"].toArray()) {
@@ -239,7 +241,7 @@ int main(int argc, char **argv) {
             }
             item->update();
         }
-        const QMap<QString, QString> translated{{"submitted", QStringLiteral("已提交，等待设备")}, {"accepted", QStringLiteral("设备已受理")}, {"completed", QStringLiteral("执行完成")}, {"rejected", QStringLiteral("设备拒绝")}, {"failed", QStringLiteral("执行失败")}, {"unknown", QStringLiteral("超时，结果未知，请核实设备状态")}};
+        const QMap<QString, QString> translated{{"queued", QStringLiteral("已保存，等待发送")}, {"awaiting_result", QStringLiteral("已发送，等待设备")}, {"accepted", QStringLiteral("设备已受理")}, {"completed", QStringLiteral("执行完成")}, {"rejected", QStringLiteral("设备拒绝")}, {"failed", QStringLiteral("执行失败")}, {"unknown", QStringLiteral("超时，结果未知，请核实设备状态")}};
         for (const auto &entry : snapshot["commands"].toArray()) {
             auto command = entry.toObject(); auto id = command["command_id"].toString();
             auto found = pending.find(id);
@@ -252,6 +254,7 @@ int main(int argc, char **argv) {
         }
         refreshPending(); render();
         status->setText(snapshot["mqtt_ready"].toBool() ? QStringLiteral("服务器已连接 · WebSocket 实时遥测 · 运行模式下右键设备控制") : QStringLiteral("网关已连接，但 MQTT 尚未就绪；设备控制已禁用"));
+        if (!controlAllowed) status->setText(status->text() + QStringLiteral(" · 只读"));
     });
     QObject::connect(&stream, &TelemetryStream::unavailable, &window, [&](const QString &reason) {
         offline(); status->setText(reason);
@@ -268,13 +271,13 @@ int main(int argc, char **argv) {
             || !candidate.query().isEmpty() || !candidate.fragment().isEmpty()
             || (candidate.path() != "" && candidate.path() != "/")
             || !(candidate.scheme() == "https" || (candidate.scheme() == "http" && local))
-            || token->text().size() < 24) {
-            QMessageBox::warning(&window, QStringLiteral("连接设置无效"), QStringLiteral("请输入 HTTPS 服务地址或本机 HTTP 隧道地址（不含路径），以及至少 24 字符的访问令牌。")); return;
+            || token->text().size() < 32) {
+            QMessageBox::warning(&window, QStringLiteral("连接设置无效"), QStringLiteral("请输入 HTTPS 服务地址（不含路径），以及服务器的 API 令牌（至少 32 字符）。")); return;
         }
         base = candidate; credential = token->text().toUtf8(); ++generation;
         histories.clear(); lastSamples.clear();
         for (auto *item : diagram->equipment) item->telemetry = {};
-        settings.setValue("gateway", candidate.toString());
+        settings.setValue("api_server", candidate.toString());
         url->setEnabled(false); token->setEnabled(false); connect->setText(QStringLiteral("断开服务器"));
         receiving = true;
         status->setText(QStringLiteral("正在连接 WebSocket，等待遥测快照…"));
@@ -292,14 +295,14 @@ int main(int argc, char **argv) {
     });
     watchdog.start();
     diagram->control = [&](EquipmentItem *item, const QString &operation) {
-        if (!connected || !item->online || item->pending || diagram->editing) return;
+        if (!connected || !controlAllowed || !item->online || item->pending || diagram->editing) return;
         const QString device = item->deviceId, equipment = item->equipmentId;
         const auto epoch = generation;
         const QString action = operation == "open_breaker" ? QStringLiteral("分闸") : QStringLiteral("合闸");
         if (QMessageBox::question(&window, QStringLiteral("确认设备操作"),
             QStringLiteral("向服务器发送 %1 指令？\n设备：%2\n断路器：%3").arg(action, device, equipment),
             QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) return;
-        if (epoch != generation || !connected || !item->online || item->pending) return;
+        if (epoch != generation || !connected || !controlAllowed || !item->online || item->pending) return;
         const QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
         int row = commands->rowCount(); commands->insertRow(row);
         const QStringList cells{QDateTime::currentDateTime().toString("HH:mm:ss"), device + " / " + equipment, action + " / " + id, QStringLiteral("发送中")};
@@ -307,17 +310,17 @@ int main(int argc, char **argv) {
         commands->scrollToBottom();
         pending.insert(id, {device, row, QDateTime::currentMSecsSinceEpoch(), false});
         refreshPending();
-        auto payload = QJsonDocument(QJsonObject{{"command_id", id}, {"device_id", device}, {"equipment_id", equipment}, {"operation", operation}}).toJson(QJsonDocument::Compact);
-        auto *reply = network.post(request("/api/commands"), payload);
-        QObject::connect(reply, &QNetworkReply::finished, &window, [&, reply, id] {
+        auto *reply = network.post(ServerProtocol::commandRequest(base, credential, device),
+                                   ServerProtocol::commandBody(id, operation));
+        QObject::connect(reply, &QNetworkReply::finished, &window, [&, reply, id, device] {
             reply->deleteLater();
             auto &p = pending[id];
             if (p.terminal) return;
             auto object = QJsonDocument::fromJson(reply->readAll()).object();
             int code = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-            if (code >= 400 && code < 500 && object.contains("error")) {
-                commands->item(p.row, 3)->setText(QStringLiteral("网关拒绝：") + object["error"].toString()); p.terminal = true;
-            } else if (reply->error() != QNetworkReply::NoError || code != 202 || object["command_id"] != id) {
+            if (code >= 400 && code < 500) {
+                commands->item(p.row, 3)->setText(QStringLiteral("服务器拒绝：HTTP %1 ").arg(code) + object["detail"].toString()); p.terminal = true;
+            } else if (reply->error() != QNetworkReply::NoError || code != 202 || !ServerProtocol::matchesCommand(object, device, id)) {
                 commands->item(p.row, 3)->setText(QStringLiteral("发送结果未知，正在等待设备回执"));
             } else if (commands->item(p.row, 3)->text() == QStringLiteral("发送中")) {
                 commands->item(p.row, 3)->setText(QStringLiteral("已提交，等待设备回执"));

@@ -1,7 +1,8 @@
 # Run with PowerShell 7 on Linux or Windows; no installers/network/admin required.
 $ErrorActionPreference = 'Stop'
 $scriptDirectory = Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts'
-foreach ($file in Get-ChildItem $scriptDirectory -Filter '*.ps1') {
+$monitorScripts = Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'monitor-client/scripts'
+foreach ($file in Get-ChildItem @($scriptDirectory, $monitorScripts) -Filter '*.ps1') {
     # ASCII source remains identical under UTF-8 and Windows ANSI code pages,
     # including when an editor or transfer tool removes the UTF-8 BOM.
     $sourceBytes = [IO.File]::ReadAllBytes($file.FullName)

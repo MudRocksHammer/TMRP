@@ -205,8 +205,8 @@ void Diagram::contextMenuEvent(QContextMenuEvent *event) {
     } else {
         auto *open = menu.addAction(QStringLiteral("分闸"));
         auto *close = menu.addAction(QStringLiteral("合闸"));
-        open->setEnabled(item->online && !item->pending);
-        close->setEnabled(item->online && !item->pending);
+        open->setEnabled(controlEnabled && item->online && !item->pending);
+        close->setEnabled(controlEnabled && item->online && !item->pending);
         menu.addSeparator();
         menu.addAction(item->online ? QStringLiteral("操作结果以设备回执为准") : QStringLiteral("离线或数据过期，无法控制"))->setEnabled(false);
         auto *action = menu.exec(event->globalPos());

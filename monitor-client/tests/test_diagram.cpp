@@ -36,11 +36,24 @@ private slots:
         QVERIFY(inspected);
         QVERIFY(operation.isEmpty());
         item->online = true;
+        inspected = false;
+        QTimer::singleShot(10, &diagram, [&] {
+            auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+            if (!menu) return;
+            inspected = !menu->actions()[0]->isEnabled() && !menu->actions()[1]->isEnabled();
+            menu->close();
+        });
+        QContextMenuEvent readOnly(QContextMenuEvent::Mouse, point, diagram.viewport()->mapToGlobal(point));
+        QApplication::sendEvent(diagram.viewport(), &readOnly);
+        QVERIFY(inspected);
+        QVERIFY(operation.isEmpty());
+        diagram.controlEnabled = true;
         QTimer::singleShot(10, &diagram, [&] {
             auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
             if (!menu) return;
             menu->setActiveAction(menu->actions()[0]);
             QTest::keyClick(menu, Qt::Key_Return);
+            menu->close();
         });
         QContextMenuEvent online(QContextMenuEvent::Mouse, point, diagram.viewport()->mapToGlobal(point));
         QApplication::sendEvent(diagram.viewport(), &online);

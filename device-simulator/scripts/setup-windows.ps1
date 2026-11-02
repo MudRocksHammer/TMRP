@@ -5,6 +5,7 @@ param(
     [ValidatePattern('^6\.\d+\.\d+$')][string]$QtVersion = '6.8.3',
     [string]$QtPrefix,
     [string]$VcpkgRoot,
+    [switch]$WithMonitor,
     [switch]$SetupOnly,
     [switch]$Launch
 )
@@ -132,7 +133,8 @@ function Start-Setup {
             if (Test-QtKit $candidate) { $QtPrefix = $candidate; break }
         }
     }
-    if (!$QtPrefix) {
+    $needsMonitor = $WithMonitor -and $QtPrefix -and !(Test-Path (Join-Path $QtPrefix 'lib/cmake/Qt6WebSockets/Qt6WebSocketsConfig.cmake'))
+    if (!$QtPrefix -or $needsMonitor) {
         $python = Find-Python
         if (!$python) {
             Install-WingetPackage 'Python.Python.3.12' @('--scope', 'user')
@@ -144,11 +146,27 @@ function Start-Setup {
         if (!(Test-Path $aqtPython)) { Invoke-Checked $python @('-m', 'venv', $venv) }
         Invoke-Checked $aqtPython @('-m', 'pip', 'install', 'aqtinstall==3.3.0')
         $qtRoot = Join-Path $root 'Qt'
-        Invoke-Checked $aqtPython @('-m', 'aqt', 'install-qt', 'windows', 'desktop',
-            $QtVersion, 'win64_msvc2022_64', '--outputdir', $qtRoot)
+        $extra = @()
+        if ($QtPrefix) {
+            # Add only the missing module to an existing standard MSVC kit.
+            $versionDirectory = Split-Path $QtPrefix -Parent
+            $installedVersion = Split-Path $versionDirectory -Leaf
+            if ((Split-Path $QtPrefix -Leaf) -ne 'msvc2022_64' -or $installedVersion -notmatch '^6\.\d+\.\d+$') {
+                throw 'Add Qt WebSockets with Qt Maintenance Tool for this custom QtPrefix, then retry.'
+            }
+            $QtVersion = $installedVersion
+            $qtRoot = Split-Path $versionDirectory -Parent
+            $extra += '--noarchives'
+        }
+        if ($WithMonitor) { $extra += @('--modules', 'qtwebsockets') }
+        Invoke-Checked $aqtPython (@('-m', 'aqt', 'install-qt', 'windows', 'desktop',
+            $QtVersion, 'win64_msvc2022_64', '--outputdir', $qtRoot) + $extra)
         $QtPrefix = Join-Path $qtRoot "$QtVersion/msvc2022_64"
     }
     if (!(Test-QtKit $QtPrefix)) { throw "Qt installation incomplete: $QtPrefix" }
+    if ($WithMonitor -and !(Test-Path (Join-Path $QtPrefix 'lib/cmake/Qt6WebSockets/Qt6WebSocketsConfig.cmake'))) {
+        throw 'Qt WebSockets installation incomplete.'
+    }
     $QtPrefix = [IO.Path]::GetFullPath($QtPrefix)
     $simulator = Split-Path $PSScriptRoot -Parent
     $settingsDirectory = Join-Path $simulator '.deps'

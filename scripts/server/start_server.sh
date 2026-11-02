@@ -8,6 +8,10 @@ initialize=false
 
 while (( $# )); do
     case "$1" in
+        --https)
+            config="$project_root/examples/power/receiver-https.toml"
+            shift
+            ;;
         --config)
             if (( $# < 2 )); then echo '--configにはファイルを指定してください。' >&2; exit 2; fi
             config="$2"
@@ -15,7 +19,8 @@ while (( $# )); do
             ;;
         --init-db) initialize=true; shift ;;
         -h|--help)
-            echo 'Usage: bash scripts/server/start_server.sh [--config PATH] [--init-db]'
+            echo 'Usage: bash scripts/server/start_server.sh [--https | --config PATH] [--init-db]'
+            echo '--https: 監視クライアント用HTTPS/WSS設定を使用します。証明書とAPIトークンが必要です。'
             echo 'TMRP_RECEIVER_DSNが必要です。Broker・PostgreSQLは事前に起動してください。'
             echo '--init-db: 電力テーブルを初期化してから前景でサーバーを起動します。'
             exit 0

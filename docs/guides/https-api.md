@@ -1,6 +1,6 @@
 # 監視クライアント用HTTPS API
 
-監視クライアントはHTTPSで履歴を取得し、模擬設備へ開閉指令を送る。
+監視クライアントはWSSで最新状態と指令結果を受け取り、HTTPSで履歴取得と開閉指令を行う。
 遥測と設備への指令配送には引き続きMQTTを使う。
 
 ```text
@@ -41,7 +41,7 @@ set +a
 
 # DB接続先を指定し、テーブル・索引の追加後にサーバーを起動する
 export TMRP_RECEIVER_DSN="host=/var/run/postgresql dbname=tmrp_dev user=$(id -un)"
-bash scripts/server/start_server.sh --config examples/power/receiver-https.toml --init-db
+bash scripts/server/start_server.sh --https --init-db
 ```
 
 証明書はSANに接続先IP（例：`192.168.237.128`）を含むものを使う。
@@ -57,6 +57,19 @@ HTTPSの証明書設定はMQTTの`tls`・`cert_file`・`key_file`とは別。
 起動前に証明書とトークンを検査する。不備があれば終了コード2で停止する。
 API無効時は従来のMQTT受信とローカルHTTPヘルスチェックだけを起動する。
 TLSは1.2以上。平文HTTPへの自動切替は行わない。
+
+Qt監視画面のビルド・CA設定・接続は[監視クライアント](../../monitor-client/README.md)を参照。
+監視用に別の`monitor_gateway`プロセスを起動する必要はない。
+同じ8443番でHTTPSとWSSを受け付ける。
+
+## リアルタイム配信
+
+`WSS /api/stream`の接続要求に`Authorization: Bearer <APIトークン>`を付ける。
+読み取り・操作トークンの両方で購読でき、`control_allowed`が操作権限を表す。
+通常1秒ごとに`mqtt_ready`、`devices`、`commands`を含む完全スナップショットを送信する。
+設備はDB保存済みの最新サンプル、指令は最近500件。全サンプルは履歴APIから取得する。
+DB照会は購読者間で共有し、WSS接続数は16まで。遅い接続やDB障害では切断し、クライアントが再接続する。
+WSSへの指令送信は受け付けない。操作はHTTP APIへ登録する。
 
 ## Windowsから確認
 
@@ -133,6 +146,7 @@ curl.exe --fail-with-body --cacert $ca -H "Authorization: Bearer $readToken" `
 | メソッド・パス | 用途 |
 |---|---|
 | `GET /health/ready` | 受信サーバーの稼働状態 |
+| `WSS /api/stream` | 最新状態・指令結果の配信 |
 | `GET /api/v1/devices` | 登録機器と操作対象設備 |
 | `GET /api/v1/devices/{id}/telemetry` | 期間指定の履歴取得 |
 | `POST /api/v1/devices/{id}/commands` | 操作指令の登録 |

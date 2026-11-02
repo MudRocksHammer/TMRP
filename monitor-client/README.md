@@ -1,90 +1,111 @@
-# TMRP 现场线路监控客户端
+# TMRP 電力監視クライアント
 
-C++17 / Qt 6 Widgets 桌面客户端，通过 WebSocket 接收服务器监控网关的实时快照，通过 HTTP 发送控制指令。
+C++17 / Qt 6 WidgetsのWindows・Linux用監視画面。
+受信サーバーのWSSから設備状態を受け取り、HTTPSで模擬設備への開閉指令を登録する。
 
-当前仅客户端已切换到 WebSocket，仓库内服务器尚未实现 `/api/stream`。因此本版本暂时不能从现有服务器接收遥测；需要服务器后续实现下述推送协议。客户端不会回退到 HTTP 轮询。
-
-## 界面操作
-
-- 默认进入运行模式。断路器图形：红色实心为合闸，绿色斜线为分闸，灰色为离线或未知。
-- 点击设备查看电压、电流、功率、频率、数据质量、UTC 采样时间和最近 60 个采样点的功率趋势。未收到真实数据时显示空值。
-- 点击“编辑线路图”，用“选择 / 拖动”移动设备，位置按 20 单位网格吸附。
-- 用“添加断路器”点击空白处，填写设备 ID 和断路器 ID，需与服务器白名单和模拟器配置一致。
-- 用“连接设备”依次点击两台设备创建折线，再次点击起点取消。连线随设备移动。
-- 编辑模式下右键可以修改绑定、删除设备连线或删除图中设备。删除图形不发送实际设备指令。
-- 用“保存线路图 / 载入线路图”保存和恢复 JSON 布局；“适应画面”显示全部设备。布局只包含 ID、位置和连线，不包含令牌与遥测。
-- 退出编辑模式后，右键在线设备选择“分闸 / 合闸”，核对设备和断路器后确认发送。离线、数据过期或指令处理中时不能操作。
-- 下方控制记录显示指令 ID、提交、受理、完成、拒绝、失败或结果未知。发送成功不代表设备执行成功；图形状态只根据遥测更新。超时不自动重发。
-
-线路只表达现场示意连接，不计算带电范围、保护逻辑或潮流。设备自身仍负责本地/远方模式及闭锁校验。
-
-## 服务器网关启动
-
-新增 `myproj.app.monitor_gateway`，与原 `tmrp-receiver` 并行运行并共用 MQTT broker。原接收器继续负责入库；网关提供实时转发和控制，不查询数据库历史。
+- 電圧・電流・電力・周波数、遮断器状態、直近60サンプルの電力推移を表示。
+- 設備の配置・接続線を編集し、JSONで保存・読込。
+- 指令の受付・完了・拒否・失敗・結果不明を表示。遮断器の表示はテレメトリーに従う。
+- 通信断・古いデータではオフライン表示。自動再接続するが、新しい指令は自動生成しない。
 
 ```text
-设备 ── telemetry ──> MQTT broker ──> 原接收器 / PostgreSQL
-                           └──> 监控网关 ── WebSocket 快照（待服务器实现）──> Qt 客户端
-设备 <── commands ── broker <── 网关 <── HTTP 控制请求 ── 客户端
-设备 ── command-results ──> broker ──> 网关 ──> 客户端控制记录
+Qt模擬設備 ─ MQTT ─ 受信サーバー ─ PostgreSQL
+                        │
+                        ├ WSS :8443 ─ 状態・指令結果 → 監視画面
+                        └ HTTPS :8443 ← 操作指令 ─── 監視画面
 ```
 
-在已安装本项目依赖的 Python 3.12 环境，从仓库根目录执行（Linux 服务器示例）：
+## サーバー起動（Ubuntu）
+
+初回は[HTTPS設定](../docs/guides/https-api.md)で証明書・トークン・DBを準備する。
+既存の受信サーバーを停止し、TMRPルートで実行する。`monitor_gateway`は起動しない。
 
 ```bash
-export PYTHONPATH=src
-# 生成并妥善保存令牌，用于客户端连接。不要将实际令牌提交到 Git。
-export TMRP_MONITOR_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
-python -m myproj.app.monitor_gateway \
-  --equipment monitor-client/config/equipment.example.json \
-  --mqtt-host 127.0.0.1 --mqtt-port 1883 --port 8081
+# WSSを含むPython依存関係を更新する
+.venv/bin/python -m pip install -e '.[dev]'
+
+# 保存済みAPIトークンを環境変数へ読み込む
+set -a
+source .local/https/api.env
+set +a
+
+# DB接続先を指定してHTTPS/WSS付き受信サーバーを起動する
+export TMRP_RECEIVER_DSN="host=/var/run/postgresql dbname=tmrp_dev user=$(id -un)"
+bash scripts/server/start_server.sh --https --init-db
 ```
 
-Windows PowerShell 可设置 `$env:PYTHONPATH = 'src'` 和 `$env:TMRP_MONITOR_TOKEN`，再执行同一个 Python 模块。令牌至少 24 字符，客户端填写相同的值，也可从 `TMRP_MONITOR_TOKEN` 环境变量读取；客户端不保存令牌。
+Brokerは同じMosquittoの`127.0.0.1:18884`（サーバー内）と`192.168.237.128:8883`（設備のTLS接続）を使う。
+APIは`8443`、ローカルヘルスチェックは`8081`。VMのファイアウォールでは接続元から8443/TCPを許可する。
 
-`config/equipment.example.json` 是设备 ID 到断路器 ID 的白名单，默认两台设备对应模拟器配置。增加设备需修改映射并重启网关。客户端布局与此映射不一致时，设备不能控制。
+## Windowsでビルド・起動
 
-MQTT 认证使用 `--mqtt-username` 与 `TMRP_MQTT_PASSWORD` 环境变量。远程 broker 需要 `--ca-file` 验证 TLS，或使用本机 SSH 隧道。MQTT 用户需有订阅遥测和结果、发布设备 `/commands` 的权限，订阅需授予 QoS 1。
+Visual Studio 2022/2026の「C++によるデスクトップ開発」が必要。
+セットアップは模擬設備と共通のQtを使用し、不足しているQt WebSocketsを追加する。
+通常の64ビットPowerShellからTMRPルートで実行する。
 
-网关仅监听服务器本机 `127.0.0.1`。在客户端计算机建立 SSH 隧道：
+```powershell
+# 依存関係の準備、ビルド、テスト、Qt DLL配置を実行する
+powershell -ExecutionPolicy Bypass -File .\monitor-client\scripts\setup-windows.ps1
+
+# サーバー証明書を検証するCAファイルと操作用APIトークンを設定する
+$env:TMRP_MONITOR_CA_FILE = "$env:USERPROFILE\tmrp-certs\ca.crt"
+$env:TMRP_API_CONTROL_TOKEN = Read-Host 'TMRP_API_CONTROL_TOKEN'
+
+# 再ビルド・テスト後に監視画面を起動する
+powershell -ExecutionPolicy Bypass -File .\monitor-client\scripts\build-windows.ps1 -Launch
+```
+
+既存Qtを指定する場合はセットアップに`-QtPrefix 'C:\Qt\6.8.3\msvc2022_64'`を付ける。
+VS2026の実行ファイルは`monitor-client\build-windows-vs2026\Release\tmrp-monitor-client.exe`。
+読み取り専用で使う場合は操作用環境変数を設定せず、`TMRP_API_READ_TOKEN`を設定する。
+CAをOSで信頼済みなら`TMRP_MONITOR_CA_FILE`は不要。証明書検証の無効化はしない。
+
+## Linuxでビルド・起動
 
 ```bash
-ssh -N -L 8081:127.0.0.1:8081 user@your-server
+# Qt、WebSockets、コンパイラーを導入する
+sudo apt install cmake g++ qt6-base-dev qt6-websockets-dev
+
+# 監視クライアントをビルド・テストする
+cmake -S monitor-client -B monitor-client/build
+cmake --build monitor-client/build --parallel 2
+ctest --test-dir monitor-client/build --output-on-failure
+
+# CAとAPIトークンを読み込み、監視画面を起動する
+export TMRP_MONITOR_CA_FILE="$HOME/tmrp-mqtt-tls/ca.crt"
+set -a
+source .local/https/api.env
+set +a
+monitor-client/build/tmrp-monitor-client
 ```
 
-客户端填写 `http://127.0.0.1:8081` 和令牌，点击“连接服务器”。也支持用户配置的 HTTPS 反向代理根地址，使用系统证书验证，不忽略 TLS 错误、不跟随重定向。地址不带路径。
+## 接続・操作
 
-## 协议与状态
+1. 模擬設備をBrokerへ接続し、周期送信を開始する。
+2. 監視画面に`https://192.168.237.128:8443`とAPIトークンを入力し、接続する。
+3. 設備ID・遮断器IDを`examples/power/receiver-https.toml`の`api_command_targets`と合わせる。
+4. 運転モードでオンライン設備を右クリックして開放・投入を選び、対象を確認して送信する。
 
-- `WebSocket /api/stream`（客户端约定，服务器待实现）：根地址的 `http` 自动转换为 `ws`，`https` 自动转换为 `wss`，升级请求携带 `Authorization: Bearer <token>`。仍在界面填写 HTTP/HTTPS 根地址，用于同时确定控制接口地址。
-- 每条 WebSocket 消息为完整的 JSON 文本快照，结构沿用原 `GET /api/snapshot` 的响应：`mqtt_ready`（布尔）、`devices`（数组）、`commands`（数组）。设备与命令条目结构不变，不能只推送增量。首次连接和重连后立即推送完整快照，之后有变化即推送；空闲时也需至少每 3 秒重复推送一次快照，满足客户端 5 秒超时窗口。WebSocket ping/pong 不代替快照。
-- 示例：`{"mqtt_ready":true,"devices":[{"device_id":"power-meter-001","equipment_id":"breaker-001","online":true,"telemetry":{"boot_id":"boot-1","sequence_no":1,"active_power_kw":12.5}}],"commands":[]}`。控制回执同样通过快照中的 `commands` 推送。
-- 连接失败、断开、无效消息或 5 秒未收到有效快照时，立即标记设备离线并禁用控制，2 秒后自动重连。主动断开不重连。重连不会重发控制指令，相同采样按 `boot_id` 和 `sequence_no` 去重。单条消息上限为 4 MiB。
-- `POST /api/commands`：继续使用 HTTP；JSON 包含 `command_id`（UUID）、`device_id`、`equipment_id`、`operation`（`open_breaker` / `close_breaker`），要求 `Authorization: Bearer <token>`。
-- 网关增加 `schema_version: 1.0`、`message_type: command`、UTC `issued_at`、15 秒后的 `expires_at`，以 QoS 1、非 retained 发布到 `tmrp/devices/{device_id}/commands`，兼容现有模拟器协议。
-- 网关订阅 `tmrp/devices/+/telemetry` 和 `tmrp/devices/+/command-results`。遥测复用 `PowerValidator`，丢弃 retained、重复与乱序采样。结果需匹配设备、断路器、指令 ID 和协议类型。
-- 10 秒无新遥测，或采样时间距离服务器时钟超过 15 秒时标记离线；客户端 5 秒未获得有效快照也标记设备过期。设备与服务器需要时钟同步。
-- 指令 20 秒未获终态时标记 `unknown`，迟到的有效终态仍可更新结果。相同 ID 在缓存内重复提交不会再次发布。
-- 网关状态保存在内存，最多 500 条控制记录，重启后清空；不是持久审计系统。客户端记录仅在当前会话内保留。设备端已有持久指令去重。未知结果需核实设备状态，不应假设操作失败。
+APIトークンはMQTTのユーザー名・パスワードとは別。画面はトークンを保存しない。
+初期の図は`power-meter-001/002`と`breaker-001/002`。操作は模擬設備の遠方モード・インターロック条件にも従う。
 
-## 构建运行
+## 通信仕様
 
-需要 CMake、C++17 编译器和 Qt 6.4 以上 Widgets、Network、WebSockets；默认构建测试还需 Qt Test。将 Qt 路径替换为实际安装位置，也可在 Qt Creator 中打开 `CMakeLists.txt`。
+- `WSS /api/stream`：Bearer認証。DBコミット済みの最新状態と最近500件の指令結果を、通常1秒周期で完全スナップショットとして配信する。全サンプル配信ではなく、詳細履歴はHTTPS APIから取得する。
+- 最新データの受信から10秒経過、観測時刻のずれ15秒以上、またはMQTT未準備で設備をオフラインにする。監視画面でも5秒間スナップショットが届かなければ操作を禁止する。
+- `POST /api/v1/devices/{id}/commands`：操作用トークン。本文は`command_id`、`operation`、`expires_in_seconds`（画面では15秒）。設備IDの対応はサーバー設定で決まる。
+- 指令はDBに保存され、MQTTで設備へ配送される。HTTP 202は登録完了。結果不明の場合は設備状態と結果照会APIで確認する。
+- WSSは最大16接続。再接続・サーバー再起動後もDBから状態を再取得する。画面の操作履歴と電力推移はセッション内のみ。
+- 過去期間の履歴APIはサーバーに実装済み。監視GUIの期間指定検索画面は未実装。
 
-```powershell
-cmake -S monitor-client -B monitor-client/build -DCMAKE_PREFIX_PATH="C:/Qt/6.8.3/msvc2022_64"
-cmake --build monitor-client/build --config Release
-& "C:/Qt/6.8.3/msvc2022_64/bin/windeployqt.exe" monitor-client/build/Release/tmrp-monitor-client.exe monitor-client/build/Release/test_monitor_diagram.exe monitor-client/build/Release/test_monitor_stream.exe
-& ./monitor-client/build/Release/tmrp-monitor-client.exe
+## 結合テスト
+
+模擬設備と監視クライアントをビルドし、PostgreSQL・Mosquitto・OpenSSL・Pythonテスト依存関係を用意する。
+
+```bash
+# 一時Broker・DBスキーマ・証明書でQt同士の開閉指令とWSS通知を検証する
+TMRP_TEST_DSN="host=/var/run/postgresql dbname=tmrp_dev user=$(id -un)" \
+  .venv/bin/python -m pytest -q tests/integration/collection/test_power_server_integration.py -k operates_real_qt
 ```
 
-Linux 上可运行 `monitor-client/build/tmrp-monitor-client`。可以通过 `TMRP_MONITOR_FONT` 指定本机中文字体文件。
-
-## 验证
-
-```powershell
-python -m pytest tests/units/app/test_monitor_gateway.py -q
-ctest --test-dir monitor-client/build -C Release --output-on-failure
-```
-
-Windows 无窗口测试需要 Qt `platforms/qoffscreen.dll`（可从 Qt 安装目录复制到可执行文件的 `platforms/` 目录）。客户端流测试使用本地 `QWebSocketServer`，验证认证请求、快照接收、异常消息、断线重连、主动断开与数据超时。网关测试使用模拟 MQTT 发布器和真实本机 HTTP 请求，覆盖鉴权、指令映射、重复提交、离线禁控、回执匹配及超时；不代替远程服务器和实际设备的联调。
+Qt通信試験は画面と同じWSS受信・指令作成処理を使う。GUIの手動クリックやWindowsからVMまでのネットワーク確認は別途必要。

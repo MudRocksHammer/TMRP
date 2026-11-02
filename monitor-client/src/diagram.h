@@ -24,6 +24,7 @@ public:
     enum Tool { Select, Add, Wire };
     Tool tool = Select;
     bool editing = false;
+    bool controlEnabled = false;
     QList<EquipmentItem *> equipment;
     QList<QPair<EquipmentItem *, EquipmentItem *>> wires;
     EquipmentItem *wireStart = nullptr;
