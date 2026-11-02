@@ -22,6 +22,7 @@ import pytest
 from paho.mqtt import publish
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
+from websockets.sync.client import connect as websocket_connect
 
 from myproj.collection.power_receiver import PowerReceiver
 from myproj.collection.power_validation import PowerValidator
@@ -500,6 +501,79 @@ def test_simulator_runs_until_terminated(server, power_db, tmp_path):
     assert receiver.wait(timeout=8) == 0
 
 
+def test_monitor_snapshot_latest_sample_and_staleness(power_db, sample):
+    dsn, conn = power_db
+    device = sample["device_id"]
+    now = datetime.now(timezone.utc)
+    receiver = PowerReceiver(
+        PowerValidator(frozenset({device})), PowerStore(conn), lambda: now
+    )
+    # Late delivery must not roll the monitor back to an older sample.
+    for seq, age in [(3, 0), (2, 1), (1, 2)]:
+        receiver.handle(
+            TOPIC,
+            json.dumps(
+                {
+                    **sample,
+                    "sequence_no": seq,
+                    "event_time": (now - timedelta(seconds=age)).isoformat(),
+                }
+            ).encode(),
+            qos=1,
+            retain=False,
+            acknowledge=lambda: None,
+        )
+    store = ControlStore(dsn)
+    devices = frozenset({device, "no-samples"})
+    equipment = {device: "breaker-001"}
+    snapshot = store.monitor_snapshot(devices, equipment)
+    rows = {row["device_id"]: row for row in snapshot["devices"]}
+    assert rows[device]["telemetry"]["sequence_no"] == 3
+    assert rows[device]["online"]
+    assert rows["no-samples"]["telemetry"] is None
+    assert not rows["no-samples"]["online"]
+    conn.execute("UPDATE power_telemetry SET received_at=now()-interval '11 seconds'")
+    assert not any(
+        row["online"] for row in store.monitor_snapshot(devices, equipment)["devices"]
+    )
+    conn.execute(
+        "UPDATE power_telemetry SET received_at=now(), "
+        "event_time=now()-interval '16 seconds'"
+    )
+    assert not any(
+        row["online"] for row in store.monitor_snapshot(devices, equipment)["devices"]
+    )
+
+
+@pytest.mark.parametrize("server", [True], indirect=True)
+def test_wss_recovers_committed_snapshot_after_restart(server, broker, sample):
+    process = server.start()
+    sample["event_time"] = datetime.now(timezone.utc).isoformat()
+    send(broker, sample)
+    url = f"wss://127.0.0.1:{server.api_port}/api/stream"
+    options = {
+        "ssl": ssl.create_default_context(cafile=str(server.certificate)),
+        "additional_headers": {"Authorization": "Bearer " + "r" * 32},
+        "proxy": None,
+    }
+    with websocket_connect(url, **options) as socket:
+        snapshot = None
+        for _ in range(5):
+            snapshot = json.loads(socket.recv(timeout=4))
+            if snapshot["devices"][0]["telemetry"]:
+                break
+        assert snapshot["devices"][0]["telemetry"]["boot_id"] == sample["boot_id"]
+        assert snapshot["control_allowed"] is False
+    process.terminate()
+    assert process.wait(timeout=20) == 0
+    server.start()
+    with websocket_connect(url, **options) as socket:
+        restored = json.loads(socket.recv(timeout=4))
+        assert (
+            restored["devices"][0]["telemetry"] == snapshot["devices"][0]["telemetry"]
+        )
+
+
 def test_history_paging_and_command_outbox_persistence(power_db, sample):
     dsn, conn = power_db
     receiver = PowerReceiver(
@@ -673,10 +747,16 @@ def test_https_history_and_commands_through_real_mqtt_after_restart(
 
 
 @pytest.mark.parametrize("server", [True], indirect=True)
-def test_https_operates_real_qt_simulator(server, broker, power_db, tmp_path):
+@pytest.mark.parametrize("monitor_flow", [False, True])
+def test_https_operates_real_qt_simulator(
+    server, broker, power_db, tmp_path, monitor_flow
+):
     binary = ROOT / "device-simulator/build/tmrp-device-simulator"
     if not binary.exists():
         pytest.skip("Build the Qt simulator for the HTTPS-to-Qt end-to-end test")
+    monitor = ROOT / "monitor-client/build/probe_monitor_live"
+    if monitor_flow and not monitor.exists():
+        pytest.skip("Build monitor-client to test the real Qt WSS/HTTPS flow")
     server.start()
     profile = tmp_path / "fleet.json"
     device_settings = json.loads(
@@ -715,6 +795,39 @@ def test_https_operates_real_qt_simulator(server, broker, power_db, tmp_path):
             stderr=log,
         )
         try:
+            if monitor_flow:
+                probe = subprocess.run(
+                    [str(monitor)],
+                    env={
+                        **env,
+                        "TMRP_MONITOR_TEST_URL": f"https://127.0.0.1:{server.api_port}",
+                        "TMRP_MONITOR_CA_FILE": str(server.certificate),
+                        "TMRP_API_CONTROL_TOKEN": "c" * 32,
+                    },
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                assert probe.returncode == 0, probe.stdout + probe.stderr
+                rows = (
+                    power_db[1]
+                    .execute(
+                        "SELECT payload->>'operation', result->>'status' "
+                        "FROM device_commands ORDER BY created_at"
+                    )
+                    .fetchall()
+                )
+                assert rows == [
+                    ("open_breaker", "completed"),
+                    ("close_breaker", "completed"),
+                ]
+                assert (
+                    power_db[1]
+                    .execute("SELECT count(*) FROM power_telemetry")
+                    .fetchone()[0]
+                    > 0
+                )
+                return
             with httpx.Client(
                 base_url=f"https://127.0.0.1:{server.api_port}",
                 verify=ssl.create_default_context(cafile=str(server.certificate)),

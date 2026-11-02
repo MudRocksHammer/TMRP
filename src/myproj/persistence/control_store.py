@@ -96,6 +96,50 @@ class ControlStore:
             ).fetchone()
         return command_view(row) if row else None
 
+    def monitor_snapshot(
+        self, devices: frozenset[str], equipment: dict[str, str]
+    ) -> dict[str, Any]:
+        """Read committed latest samples once per broadcast, not per subscriber."""
+        with self.connection() as conn:
+            rows = conn.execute(
+                "SELECT d.device_id, t.payload, t.received_at, t.event_time "
+                "FROM unnest(%s::text[]) AS d(device_id) "
+                "LEFT JOIN LATERAL (SELECT payload, received_at, event_time "
+                "FROM power_telemetry WHERE device_id=d.device_id "
+                "ORDER BY event_time DESC, boot_id DESC, sequence_no DESC LIMIT 1) "
+                "t ON true ORDER BY d.device_id",
+                (sorted(devices),),
+            ).fetchall()
+            commands = conn.execute(
+                "SELECT * FROM device_commands WHERE device_id=ANY(%s) "
+                "ORDER BY created_at DESC, device_id, command_id LIMIT 500",
+                (sorted(devices),),
+            ).fetchall()
+        now = datetime.now(timezone.utc)
+        return {
+            "devices": [
+                {
+                    "device_id": row["device_id"],
+                    "equipment_id": equipment.get(row["device_id"]),
+                    "online": row["payload"] is not None
+                    and timedelta(0) <= now - row["received_at"] < timedelta(seconds=10)
+                    and abs(now - row["event_time"]) < timedelta(seconds=15),
+                    "telemetry": row["payload"],
+                    "received_at": row["received_at"],
+                }
+                for row in rows
+            ],
+            "commands": [
+                {
+                    "command_id": row["command_id"],
+                    "device_id": row["device_id"],
+                    "status": command_view(row)["status"],
+                    "result": row["result"],
+                }
+                for row in commands
+            ],
+        }
+
 
 def command_view(row: dict[str, Any]) -> dict[str, Any]:
     result = row["result"]

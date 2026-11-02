@@ -35,3 +35,5 @@ CREATE TABLE IF NOT EXISTS device_commands (
 );
 CREATE INDEX IF NOT EXISTS device_commands_dispatch
     ON device_commands (next_attempt_at) WHERE result IS NULL OR result->>'status' = 'accepted';
+CREATE INDEX IF NOT EXISTS device_commands_recent
+    ON device_commands (created_at DESC, device_id, command_id);

@@ -1,4 +1,4 @@
-"""Authenticated HTTP snapshot/control gateway for the Qt monitor.
+"""Legacy HTTP snapshot gateway (not used by the WSS monitoring client).
 
 Run beside the receiver on the server. MQTT remains the device transport;
 this process does not replace the durable receiver or its database.
@@ -272,9 +272,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--equipment", required=True, type=Path)
     parser.add_argument("--host", default="127.0.0.1", choices=["127.0.0.1"])
-    parser.add_argument("--port", default=8081, type=int)
+    parser.add_argument("--port", default=8082, type=int)
     parser.add_argument("--mqtt-host", default="127.0.0.1")
-    parser.add_argument("--mqtt-port", default=1883, type=int)
+    parser.add_argument("--mqtt-port", default=18884, type=int)
     parser.add_argument("--mqtt-username", default="")
     parser.add_argument("--ca-file")
     args = parser.parse_args()

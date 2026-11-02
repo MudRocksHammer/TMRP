@@ -4,19 +4,30 @@ import os
 import secrets
 import ssl
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, suppress
 from datetime import timedelta
 from threading import Thread
 from typing import Annotated, Any
 
 import psycopg
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import (
+    Depends,
+    FastAPI,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from loguru import logger
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from myproj.app.monitor_stream import MonitorStream
 from myproj.app.receiver_config import ReceiverConfig
 from myproj.app.receiver_health import ReceiverHealth
 from myproj.collection.power_validation import strict_json
@@ -108,9 +119,51 @@ def create_api(
     read_token: str,
     control_token: str,
 ) -> FastAPI:
-    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    stream = MonitorStream(store, health, devices, config.api_command_targets)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        task = asyncio.create_task(stream.run())
+        try:
+            yield
+        finally:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.add_middleware(RequestLimit)
     bearer = HTTPBearer(auto_error=False)
+
+    @app.websocket("/api/stream")
+    async def snapshots(socket: WebSocket) -> None:
+        header = socket.headers.get("authorization", "")
+        scheme, _, token = header.partition(" ")
+        candidate = token.encode() if scheme.lower() == "bearer" else b""
+        control = secrets.compare_digest(candidate, control_token.encode())
+        if not control and not secrets.compare_digest(candidate, read_token.encode()):
+            await socket.close(code=1008)
+            return
+        # Reserve before accepting so concurrent handshakes cannot exceed the cap.
+        if len(stream.connections) >= 16:
+            await socket.close(code=1013)
+            return
+        stream.connections.add(socket)
+        try:
+            await socket.accept()
+            stream.clients[socket] = control
+            while True:
+                message = await socket.receive()
+                if message["type"] == "websocket.disconnect":
+                    break
+                # Commands are authenticated, durable HTTP requests, never WS input.
+                await stream.close(socket, 1008)
+                break
+        except (WebSocketDisconnect, OSError, RuntimeError):
+            pass
+        finally:
+            stream.clients.pop(socket, None)
+            stream.connections.discard(socket)
 
     def authorize(
         credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
@@ -240,7 +293,9 @@ class APIServer:
             limit_concurrency=32,
             timeout_keep_alive=5,
             timeout_graceful_shutdown=10,
-            ws="none",
+            ws="websockets-sansio",
+            ws_max_size=16384,
+            ws_per_message_deflate=False,
         )
         options.load()
         assert options.ssl is not None

@@ -9,7 +9,7 @@ tls = false
 health_host = "127.0.0.1"
 health_port = 8081
 max_payload_bytes = 16384
-# 監視クライアント用HTTPS API。MQTTのtlsとは別の設定。
+# 監視クライアント用HTTPS APIとWSS配信。MQTTのtlsとは別の設定。
 api_enabled = false
 api_host = "0.0.0.0"
 api_port = 8443
