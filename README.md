@@ -64,6 +64,41 @@ sudo -u postgres createdb --owner="$(id -un)" tmrp_dev
 | APIトークン | `.local/https/api.env`に`TMRP_API_READ_TOKEN`と`TMRP_API_CONTROL_TOKEN`を保存。[証明書・トークンの準備](docs/guides/https-api.md#起動)を参照 |
 | ネットワーク | WindowsからVMの8883/TCP・8443/TCPへ接続可能にする。VMのIPが変わった場合は接続設定と証明書を合わせる |
 
+UbuntuのTMRPルートで、HTTPS用ファイルを初回作成する。
+以下は`~/tmrp-mqtt-tls/`に作成済みの証明書を使う。既存の配置先ファイルは上書きしない。
+
+```bash
+# 実行場所を合わせ、所有者だけがアクセスできる保存先を作る
+cd ~/pythonLearning/TMRP
+install -d -m 700 .local/https
+
+# HTTPS用に証明書と秘密鍵を配置する（配置済みなら省略）
+if [[ ! -e .local/https/server.crt ]]; then
+    install -m 600 ~/tmrp-mqtt-tls/server.crt .local/https/server.crt
+fi
+if [[ ! -e .local/https/server.key ]]; then
+    install -m 600 ~/tmrp-mqtt-tls/server.key .local/https/server.key
+fi
+
+# 読み取り用・操作用トークンを生成する。既存のトークンは変更しない
+python3 - <<'PY'
+import os
+import secrets
+os.umask(0o077)
+try:
+    with open('.local/https/api.env', 'x') as target:
+        for name in ('TMRP_API_READ_TOKEN', 'TMRP_API_CONTROL_TOKEN'):
+            target.write(f'{name}={secrets.token_hex(32)}\n')
+    print('Created .local/https/api.env')
+except FileExistsError:
+    print('Using existing .local/https/api.env')
+PY
+```
+
+`.local/`はGit管理対象外のため、cloneやpullでは作成されない。
+`source .local/https/api.env`が`No such file or directory`になる場合は、
+TMRPルートにいることと、この初回作成を済ませたことを確認する。
+
 ### Windows：アプリのビルド・CAのコピー
 
 Visual Studio 2022/2026で「C++によるデスクトップ開発」を導入しておく。
@@ -117,6 +152,9 @@ Mosquittoの設定を変更した直後は`sudo systemctl restart mosquitto`で�
 同じ受信サーバーが既に動いている場合は、先にそのプロセスまたはsystemdサービスを停止する。
 
 ```bash
+# 初回作成したファイルがあるプロジェクトへ移動する
+cd ~/pythonLearning/TMRP
+
 # 保存済みトークンを、この端末から起動するサーバーへ渡す
 set -a
 source .local/https/api.env
